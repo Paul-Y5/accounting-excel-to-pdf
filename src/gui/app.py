@@ -6,10 +6,11 @@ Módulo de interface gráfica do Conversor Excel → PDF.
 
 import os
 import sys
+import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 
-from src.config import load_config, save_config
+from src.config import load_config, save_config, DEFAULT_CONFIG
 from src.converter import ExcelToPDFConverter
 class ConverterApp:
     """Aplicação principal com interface gráfica simples para conversão de Excel para PDF."""
@@ -618,3 +619,7 @@ O documento é tratado como um documento comercial informativo."""
     def run(self):
         """Inicia a aplicação."""
         self.root.mainloop()
+
+
+# ============================================
+# PONTO DE ENTRADA

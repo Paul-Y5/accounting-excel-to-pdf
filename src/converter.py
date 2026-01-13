@@ -890,3 +890,7 @@ class ExcelToPDFConverter:
         elements.append(Paragraph(footer_text, self.styles['Footer']))
         
         doc.build(elements)
+
+
+# ============================================
+# INTERFACE GRÁFICA
