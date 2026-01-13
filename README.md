@@ -93,19 +93,34 @@ A aplicação permite personalizar:
 
 ---
 
-## 📁 Ficheiros do Projeto
+## 📁 Estrutura do Projeto
 
 ```
 Script_conversor/
-├── dist/
-│   └── ConversorExcelPDF     # ← Executável
-├── converter_excel_pdf.py    # Script principal
-├── criar_excel_exemplo.py    # Gerador de dados de teste
-├── dados_exemplo.xlsx        # Excel de exemplo
-├── requirements.txt          # Dependências Python
-├── config.json              # Configurações guardadas
-└── venv/                    # Ambiente virtual Python
+├── src/                         # Módulos do projeto
+│   ├── config.py                # Configurações
+│   ├── converter.py             # Conversor Excel→PDF
+│   └── gui/app.py               # Interface gráfica
+├── tests/                       # Testes unitários
+│   ├── test_config.py
+│   └── test_converter.py
+├── .github/workflows/test.yml   # CI automático
+├── converter_excel_pdf.py       # Entry point
+├── requirements.txt
+├── pytest.ini
+└── config.json
 ```
+
+---
+
+## Testes
+
+```bash
+source venv/bin/activate
+pytest tests/ -v
+```
+
+O CI executa automaticamente em PRs para `main`.
 
 ---
 
