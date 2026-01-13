@@ -11,6 +11,7 @@ Versão: 1.0
 import os
 import sys
 import json
+import copy
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from datetime import datetime
@@ -83,6 +84,11 @@ DEFAULT_CONFIG = {
         'colunas': 'Nr., SIGLA, Cliente, CONTAB, Iva, Subtotal, Extras, Duodécimos, S.Social GER, S.Soc Emp, Ret. IRS, Ret. IRS EXT, SbTx/Fcomp, Outro, TOTAL',
         'destacar_total': True,
         'destacar_valores': True,
+    },
+    'banking': {
+        'show_banking': True,
+        'bank_name': 'ABANCA',
+        'iban': 'PT50 0170 3782 0304 0053 5672 9',
     }
 }
 
@@ -105,14 +111,14 @@ def load_config() -> dict:
                 saved_config = json.load(f)
 
                 # Merge com defaults para garantir que todas as chaves existem
-                config = DEFAULT_CONFIG.copy()
+                config = copy.deepcopy(DEFAULT_CONFIG)
                 for section, values in saved_config.items():
                     if section in config:
                         config[section].update(values)
                 return config
         except Exception:
             pass
-    return DEFAULT_CONFIG.copy()
+    return copy.deepcopy(DEFAULT_CONFIG)
 
 
 def save_config(config: dict):
@@ -788,33 +794,27 @@ class ExcelToPDFConverter:
             elements.extend(self.create_header(data))
             elements.extend(self.create_items_table(data))
             
-            # Rodapé com assinatura para contabilidade
+            # Rodapé com dados bancários para contabilidade
             elements.append(Spacer(1, 10*mm))
             
-            # Tabela de assinatura de verificação
+            # Dados bancários (substitui "Verificado por" e "Data")
             mes_ref = data.get('mes_referencia', '')
-            sig_data = [
-                ['Verificado por:', '', 'Data:'],
-                ['', '', ''],
-                ['_' * 35, '', '_' * 35],
-                ['', '', ''],
-                [f'Mês de Referência: {mes_ref}', '', '___/___/_______'],
-            ]
+            banking_cfg = self.config.get('banking', {})
             
-            sig_table = Table(sig_data, colWidths=[90*mm, 40*mm, 90*mm])
-            sig_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-                ('ALIGN', (2, 0), (2, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
-                ('FONTNAME', (2, 0), (2, 0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ]))
+            if banking_cfg.get('show_banking', True):
+                bank_name = banking_cfg.get('bank_name', 'ABANCA')
+                iban = banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9')
+                
+                banking_text = f"""<b>Nossos Dados Bancários:</b><br/>
+                {bank_name}<br/>
+                IBAN: {iban}"""
+                elements.append(Paragraph(banking_text, self.styles['NormalText']))
+                elements.append(Spacer(1, 5*mm))
             
-            elements.append(sig_table)
-            elements.append(Spacer(1, 8*mm))
+            # Mês de referência
+            if mes_ref:
+                elements.append(Paragraph(f"Mês de Referência: {mes_ref}", self.styles['NormalText']))
+                elements.append(Spacer(1, 8*mm))
             
             # Data de geração
             footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
@@ -983,30 +983,23 @@ class ExcelToPDFConverter:
         values_table.setStyle(TableStyle(style_cmds))
         elements.append(values_table)
         
-        # === ASSINATURA ===
+        # === DADOS BANCÁRIOS ===
         elements.append(Spacer(1, 15*mm))
         
-        sig_data = [
-            ['Verificado por:', '', 'Data:'],
-            ['', '', ''],
-            ['_' * 35, '', '_' * 35],
-            ['', '', ''],
-            [f'Mês de Referência: {mes_ref}', '', '___/___/_______'],
-        ]
+        banking_cfg = self.config.get('banking', {})
         
-        sig_table = Table(sig_data, colWidths=[70*mm, 30*mm, 70*mm])
-        sig_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (2, 0), (2, 0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ]))
+        if banking_cfg.get('show_banking', True):
+            bank_name = banking_cfg.get('bank_name', 'ABANCA')
+            iban = banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9')
+            
+            banking_text = f"""<b>Nossos Dados Bancários:</b><br/>
+            {bank_name}<br/>
+            IBAN: {iban}"""
+            elements.append(Paragraph(banking_text, self.styles['NormalText']))
+            elements.append(Spacer(1, 5*mm))
         
-        elements.append(sig_table)
+        # Mês de referência
+        elements.append(Paragraph(f"Mês de Referência: {mes_ref}", self.styles['NormalText']))
         elements.append(Spacer(1, 8*mm))
         
         # Data de geração
@@ -1052,33 +1045,38 @@ class ConverterApp:
         
         # Tab 1: Conversão
         self.tab_convert = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_convert, text='📄 Converter')
+        self.notebook.add(self.tab_convert, text='Converter')
         self._setup_convert_tab()
         
         # Tab 2: Configurações PDF
         self.tab_pdf = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_pdf, text='📐 Página PDF')
+        self.notebook.add(self.tab_pdf, text='Página PDF')
         self._setup_pdf_tab()
         
         # Tab 3: Cabeçalho
         self.tab_header = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_header, text='🏢 Cabeçalho')
+        self.notebook.add(self.tab_header, text='Cabeçalho')
         self._setup_header_tab()
         
         # Tab 4: Tabela
         self.tab_table = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_table, text='📊 Tabela')
+        self.notebook.add(self.tab_table, text='Tabela')
         self._setup_table_tab()
         
         # Tab 5: Cores
         self.tab_colors = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_colors, text='🎨 Cores')
+        self.notebook.add(self.tab_colors, text='Cores')
         self._setup_colors_tab()
         
         # Tab 6: Contabilidade
         self.tab_contab = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_contab, text='📈 Contabilidade')
+        self.notebook.add(self.tab_contab, text='Contabilidade')
         self._setup_contabilidade_tab()
+        
+        # Tab 7: Dados Bancários
+        self.tab_banking = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_banking, text='Dados Bancários')
+        self._setup_banking_tab()
     
     def _setup_convert_tab(self):
         """Tab de conversão."""
@@ -1379,6 +1377,48 @@ class ConverterApp:
         examples_text = "\n".join(examples)
         ttk.Label(examples_frame, text=examples_text, foreground='gray', justify='left').pack(anchor='w')
     
+    def _setup_banking_tab(self):
+        """Tab de configurações de dados bancários."""
+        frame = ttk.Frame(self.tab_banking, padding=20)
+        frame.pack(fill='both', expand=True)
+        
+        # Título
+        ttk.Label(frame, text="Dados Bancários", style='Header.TLabel').pack(pady=(0, 15))
+        
+        # Descrição
+        desc_text = "Configure os dados bancários que aparecerão no rodapé do PDF.\nEstes dados substituem os campos 'Verificado por' e 'Data'."
+        ttk.Label(frame, text=desc_text, foreground='gray').pack(pady=(0, 10))
+        
+        # Mostrar dados bancários
+        banking_cfg = self.config.get('banking', {})
+        self.show_banking_var = tk.BooleanVar(value=banking_cfg.get('show_banking', True))
+        ttk.Checkbutton(frame, text="Mostrar dados bancários no PDF", 
+                       variable=self.show_banking_var).pack(anchor='w', pady=5)
+        
+        # Dados do banco
+        bank_frame = ttk.LabelFrame(frame, text="Informação Bancária", padding=10)
+        bank_frame.pack(fill='x', pady=10)
+        
+        self.bank_name_var = tk.StringVar(value=banking_cfg.get('bank_name', 'ABANCA'))
+        self.iban_var = tk.StringVar(value=banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9'))
+        
+        ttk.Label(bank_frame, text="Nome do Banco:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
+        ttk.Entry(bank_frame, textvariable=self.bank_name_var, width=40).grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+        
+        ttk.Label(bank_frame, text="IBAN:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        ttk.Entry(bank_frame, textvariable=self.iban_var, width=40).grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        
+        bank_frame.columnconfigure(1, weight=1)
+        
+        # Nota informativa
+        note_frame = ttk.LabelFrame(frame, text="Nota", padding=10)
+        note_frame.pack(fill='x', pady=10)
+        
+        note_text = """Os dados bancários são apresentados apenas como informação para pagamento.
+Não são utilizados termos coercivos, prazos ou penalizações.
+O documento é tratado como um documento comercial informativo."""
+        ttk.Label(note_frame, text=note_text, foreground='gray', justify='left').pack(anchor='w')
+    
     def _pick_color(self, key, var):
         """Abre seletor de cor."""
         color = colorchooser.askcolor(initialcolor=var.get())
@@ -1467,6 +1507,11 @@ class ConverterApp:
                 'colunas': contab_colunas,
                 'destacar_total': self.contab_destacar_total_var.get() if hasattr(self, 'contab_destacar_total_var') else True,
                 'destacar_valores': self.contab_destacar_valores_var.get() if hasattr(self, 'contab_destacar_valores_var') else True,
+            },
+            'banking': {
+                'show_banking': self.show_banking_var.get() if hasattr(self, 'show_banking_var') else True,
+                'bank_name': self.bank_name_var.get() if hasattr(self, 'bank_name_var') else 'ABANCA',
+                'iban': self.iban_var.get() if hasattr(self, 'iban_var') else 'PT50 0170 3782 0304 0053 5672 9',
             }
         }
     
