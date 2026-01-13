@@ -84,6 +84,13 @@ A aplicação permite personalizar:
 - Data de geração
 - Texto personalizado
 
+### Dados Bancários
+- Nome do banco
+- IBAN
+- Mostrar/ocultar no PDF
+
+> Os dados bancários aparecem no rodapé do PDF, substituindo os campos "Verificado por" e "Data".
+
 ---
 
 ## 📁 Estrutura do Projeto
@@ -149,6 +156,7 @@ O executável será criado em `dist/ConversorExcelPDF`.
 
 ## Notas
 
-- As configurações são guardadas automaticamente em `config.json`
+- As configurações são **persistentes** e guardadas em `config.json`
+- O cabeçalho e dados bancários são mantidos entre sessões
 - O PDF é gerado na mesma pasta do Excel por defeito
 - O executável funciona sem necessidade de Python instalado
