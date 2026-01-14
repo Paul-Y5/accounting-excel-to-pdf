@@ -75,14 +75,35 @@ DEFAULT_CONFIG = {
 }
 
 
+def get_config_dir() -> str:
+    """Retorna o diretório de configuração do utilizador.
+    
+    Windows: %APPDATA%/ConversorExcelPDF/
+    Linux:   ~/.config/ConversorExcelPDF/
+    macOS:   ~/Library/Application Support/ConversorExcelPDF/
+    """
+    app_name = "ConversorExcelPDF"
+    
+    if sys.platform == "win32":
+        # Windows: %APPDATA%
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+        config_dir = os.path.join(base, app_name)
+    elif sys.platform == "darwin":
+        # macOS: ~/Library/Application Support/
+        config_dir = os.path.join(os.path.expanduser("~"), "Library", "Application Support", app_name)
+    else:
+        # Linux/Unix: ~/.config/
+        xdg_config = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
+        config_dir = os.path.join(xdg_config, app_name)
+    
+    # Criar diretório se não existir
+    os.makedirs(config_dir, exist_ok=True)
+    return config_dir
+
+
 def get_config_path() -> str:
     """Retorna o caminho do ficheiro de configuração."""
-    if getattr(sys, 'frozen', False):
-        base_path = os.path.dirname(sys.executable)
-    else:
-        # Volta à raiz do projeto (um nível acima de src/)
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, 'config.json')
+    return os.path.join(get_config_dir(), 'config.json')
 
 
 def load_config() -> dict:
