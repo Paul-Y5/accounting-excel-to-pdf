@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
     },
     'banking': {
         'show_banking': True,
+        'title': 'Nossos Dados Bancários:',
         'bank_name': 'ABANCA',
         'iban': 'PT50 0170 3782 0304 0053 5672 9',
     }

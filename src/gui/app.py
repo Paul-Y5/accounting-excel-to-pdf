@@ -126,11 +126,11 @@ class ConverterApp:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=30)
         
-        generate_btn = ttk.Button(btn_frame, text="� Gerar PDF(s)", 
+        generate_btn = ttk.Button(btn_frame, text="Gerar PDF(s)", 
                                  command=self._generate, style='TButton')
         generate_btn.pack(side='left', padx=5)
         
-        ttk.Button(btn_frame, text="💾 Guardar Configurações", 
+        ttk.Button(btn_frame, text="Guardar Configurações", 
                   command=self._save_config).pack(side='left', padx=5)
         
         # Status
@@ -176,6 +176,9 @@ class ConverterApp:
         
         ttk.Label(margin_frame, text="Direita:").grid(row=1, column=2, sticky='w', padx=5, pady=5)
         ttk.Spinbox(margin_frame, textvariable=self.margin_right_var, from_=5, to=50, width=8).grid(row=1, column=3, padx=5)
+        
+        # Botão Guardar
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _setup_header_tab(self):
         """Tab de configurações do cabeçalho."""
@@ -218,6 +221,9 @@ class ConverterApp:
         self.logo_path_var = tk.StringVar(value=self.config['header'].get('logo_path', ''))
         ttk.Entry(logo_frame, textvariable=self.logo_path_var, width=50).pack(side='left', fill='x', expand=True)
         ttk.Button(logo_frame, text="Procurar...", command=self._browse_logo).pack(side='right', padx=(10, 0))
+        
+        # Botão Guardar
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _setup_table_tab(self):
         """Tab de configurações da tabela."""
@@ -271,6 +277,9 @@ class ConverterApp:
         ttk.Label(footer_frame, text="Texto personalizado no rodapé:").pack(anchor='w', pady=(10, 0))
         self.custom_footer_var = tk.StringVar(value=self.config['footer'].get('custom_footer', ''))
         ttk.Entry(footer_frame, textvariable=self.custom_footer_var, width=60).pack(fill='x', pady=5)
+        
+        # Botão Guardar
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _setup_colors_tab(self):
         """Tab de configurações de cores."""
@@ -304,6 +313,9 @@ class ConverterApp:
                                  command=lambda k=key, v=var, b=None: self._pick_color(k, v))
             color_btn.pack(side='left')
             self.color_vars[f'{key}_btn'] = color_btn
+        
+        # Botão Guardar
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _setup_contabilidade_tab(self):
         """Tab de configurações de contabilidade."""
@@ -376,6 +388,9 @@ class ConverterApp:
         
         examples_text = "\n".join(examples)
         ttk.Label(examples_frame, text=examples_text, foreground='gray', justify='left').pack(anchor='w')
+        
+        # Botão Guardar
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _setup_banking_tab(self):
         """Tab de configurações de dados bancários."""
@@ -386,7 +401,7 @@ class ConverterApp:
         ttk.Label(frame, text="Dados Bancários", style='Header.TLabel').pack(pady=(0, 15))
         
         # Descrição
-        desc_text = "Configure os dados bancários que aparecerão no rodapé do PDF.\nEstes dados substituem os campos 'Verificado por' e 'Data'."
+        desc_text = "Configure os dados bancários que aparecerão no rodapé do PDF."
         ttk.Label(frame, text=desc_text, foreground='gray').pack(pady=(0, 10))
         
         # Mostrar dados bancários
@@ -399,25 +414,23 @@ class ConverterApp:
         bank_frame = ttk.LabelFrame(frame, text="Informação Bancária", padding=10)
         bank_frame.pack(fill='x', pady=10)
         
+        self.banking_title_var = tk.StringVar(value=banking_cfg.get('title', 'Nossos Dados Bancários:'))
         self.bank_name_var = tk.StringVar(value=banking_cfg.get('bank_name', 'ABANCA'))
         self.iban_var = tk.StringVar(value=banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9'))
         
-        ttk.Label(bank_frame, text="Nome do Banco:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        ttk.Entry(bank_frame, textvariable=self.bank_name_var, width=40).grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+        ttk.Label(bank_frame, text="Título:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
+        ttk.Entry(bank_frame, textvariable=self.banking_title_var, width=40).grid(row=0, column=1, sticky='ew', padx=5, pady=5)
         
-        ttk.Label(bank_frame, text="IBAN:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        ttk.Entry(bank_frame, textvariable=self.iban_var, width=40).grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        ttk.Label(bank_frame, text="Nome do Banco:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        ttk.Entry(bank_frame, textvariable=self.bank_name_var, width=40).grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        
+        ttk.Label(bank_frame, text="IBAN:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+        ttk.Entry(bank_frame, textvariable=self.iban_var, width=40).grid(row=2, column=1, sticky='ew', padx=5, pady=5)
         
         bank_frame.columnconfigure(1, weight=1)
         
-        # Nota informativa
-        note_frame = ttk.LabelFrame(frame, text="Nota", padding=10)
-        note_frame.pack(fill='x', pady=10)
-        
-        note_text = """Os dados bancários são apresentados apenas como informação para pagamento.
-Não são utilizados termos coercivos, prazos ou penalizações.
-O documento é tratado como um documento comercial informativo."""
-        ttk.Label(note_frame, text=note_text, foreground='gray', justify='left').pack(anchor='w')
+        # Botão Guardar
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _pick_color(self, key, var):
         """Abre seletor de cor."""
@@ -510,6 +523,7 @@ O documento é tratado como um documento comercial informativo."""
             },
             'banking': {
                 'show_banking': self.show_banking_var.get() if hasattr(self, 'show_banking_var') else True,
+                'title': self.banking_title_var.get() if hasattr(self, 'banking_title_var') else 'Nossos Dados Bancários:',
                 'bank_name': self.bank_name_var.get() if hasattr(self, 'bank_name_var') else 'ABANCA',
                 'iban': self.iban_var.get() if hasattr(self, 'iban_var') else 'PT50 0170 3782 0304 0053 5672 9',
             }
