@@ -694,11 +694,6 @@ class ExcelToPDFConverter:
                 elements.append(Paragraph(banking_text, self.styles['NormalText']))
                 elements.append(Spacer(1, 5*mm))
             
-            # Mês de referência
-            if mes_ref:
-                elements.append(Paragraph(f"Mês de Referência: {mes_ref}", self.styles['NormalText']))
-                elements.append(Spacer(1, 8*mm))
-            
             # Data de geração
             footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
             elements.append(Paragraph(footer_text, self.styles['Footer']))
@@ -832,8 +827,8 @@ class ExcelToPDFConverter:
                 
                 table_data.append([label, valor_str])
         
-        # Criar tabela
-        values_table = Table(table_data, colWidths=[120*mm, 40*mm])
+        # Criar tabela (largura total: 170mm para alinhar com margens de 20mm)
+        values_table = Table(table_data, colWidths=[125*mm, 45*mm])
         
         style_cmds = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(colors_cfg['header_bg'])),
@@ -866,30 +861,54 @@ class ExcelToPDFConverter:
         values_table.setStyle(TableStyle(style_cmds))
         elements.append(values_table)
         
-        # === DADOS BANCÁRIOS ===
+        # === DADOS BANCÁRIOS + DATA ===
         elements.append(Spacer(1, 15*mm))
         
         banking_cfg = self.config.get('banking', {})
         
         if banking_cfg.get('show_banking', True):
+            banking_title = banking_cfg.get('title', 'Nossos Dados Bancários:')
             bank_name = banking_cfg.get('bank_name', 'ABANCA')
             iban = banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9')
             
-            banking_text = f"""<b>Nossos Dados Bancários:</b><br/>
+            # Data atual
+            data_atual = datetime.now().strftime('%d/%m/%Y')
+            
+            banking_text = f"""<b>{banking_title}</b><br/>
             {bank_name}<br/>
-            IBAN: {iban}"""
+            IBAN: {iban}<br/><br/>
+            <b>Data:</b> {data_atual}"""
             elements.append(Paragraph(banking_text, self.styles['NormalText']))
-            elements.append(Spacer(1, 5*mm))
         
-        # Mês de referência
-        elements.append(Paragraph(f"Mês de Referência: {mes_ref}", self.styles['NormalText']))
-        elements.append(Spacer(1, 8*mm))
+        # Callback para rodapé no fundo da página
+        empresa = data.get('empresa', {})
+        header_cfg = self.config['header']
+        empresa_nome = empresa.get('nome') or header_cfg.get('company_name', '')
+        empresa_tel = empresa.get('telefone') or header_cfg.get('company_phone', '')
+        empresa_email = empresa.get('email') or header_cfg.get('company_email', '')
         
-        # Data de geração
-        footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
-        elements.append(Paragraph(footer_text, self.styles['Footer']))
+        def add_page_footer(canvas, doc):
+            canvas.saveState()
+            
+            # Linha 1: Info da empresa
+            empresa_info = f"{empresa_nome}"
+            if empresa_tel:
+                empresa_info += f" | Tel: {empresa_tel}"
+            if empresa_email:
+                empresa_info += f" | {empresa_email}"
+            
+            canvas.setFont('Helvetica', 7)
+            canvas.setFillColor(colors.HexColor('#718096'))
+            canvas.drawCentredString(doc.pagesize[0] / 2, 15*mm, empresa_info)
+            
+            # Linha 2: Data de geração
+            footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+            canvas.setFont('Helvetica', 7)
+            canvas.drawCentredString(doc.pagesize[0] / 2, 10*mm, footer_text)
+            
+            canvas.restoreState()
         
-        doc.build(elements)
+        doc.build(elements, onFirstPage=add_page_footer, onLaterPages=add_page_footer)
 
 
 # ============================================
