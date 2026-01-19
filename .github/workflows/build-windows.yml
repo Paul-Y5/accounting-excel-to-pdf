@@ -12,6 +12,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write  # Necessário para criar releases
     
     steps:
     - name: Checkout code
