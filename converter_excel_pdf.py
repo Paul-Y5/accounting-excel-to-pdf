@@ -5,7 +5,7 @@ Conversor Excel → PDF
 Aplicação com Interface Gráfica Simples
 
 Autor: Paulo Cunha with the help of AI
-Versão: 2.0
+Versão: 2.1
 
 Este ficheiro é o entry point da aplicação.
 A lógica está modularizada em src/.

@@ -126,6 +126,10 @@ class ConverterApp:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=30)
         
+        preview_btn = ttk.Button(btn_frame, text="👁 Pré-visualizar", 
+                                command=self._preview_excel, style='TButton')
+        preview_btn.pack(side='left', padx=5)
+        
         generate_btn = ttk.Button(btn_frame, text="Gerar PDF(s)", 
                                  command=self._generate, style='TButton')
         generate_btn.pack(side='left', padx=5)
@@ -629,6 +633,256 @@ class ConverterApp:
         except Exception as e:
             self.status_var.set("❌ Erro na conversão")
             messagebox.showerror("Erro", f"Erro durante a geração:\n\n{str(e)}")
+    
+    def _preview_excel(self):
+        """Mostra pré-visualização dos dados do Excel antes de gerar PDF."""
+        excel_path = self.excel_path.get()
+        
+        if not excel_path:
+            messagebox.showerror("Erro", "Por favor, selecione um ficheiro Excel.")
+            return
+        
+        if not os.path.exists(excel_path):
+            messagebox.showerror("Erro", f"Ficheiro não encontrado: {excel_path}")
+            return
+        
+        try:
+            self.status_var.set("A carregar pré-visualização...")
+            self.root.update()
+            
+            # Ler dados do Excel
+            config = self._get_config_from_ui()
+            converter = ExcelToPDFConverter(excel_path, None, config)
+            data = converter.read_excel_data()
+            itens = data.get('itens', [])
+            
+            if not itens:
+                messagebox.showwarning("Aviso", "O ficheiro Excel não contém dados para converter.")
+                self.status_var.set("Pronto para converter")
+                return
+            
+            # Criar janela de pré-visualização
+            preview_window = tk.Toplevel(self.root)
+            preview_window.title(f"Pré-visualização: {os.path.basename(excel_path)}")
+            preview_window.geometry("900x600")
+            preview_window.transient(self.root)
+            preview_window.grab_set()
+            
+            # Frame principal
+            main_frame = ttk.Frame(preview_window, padding=10)
+            main_frame.pack(fill='both', expand=True)
+            
+            # Resumo
+            summary_frame = ttk.LabelFrame(main_frame, text="Resumo", padding=10)
+            summary_frame.pack(fill='x', pady=(0, 10))
+            
+            # Obter colunas
+            all_cols = set()
+            for item in itens:
+                all_cols.update(item.keys())
+            
+            mes_ref = data.get('mes_referencia', 'N/A')
+            mode_text = "Individual (1 PDF por linha)" if self.generation_mode_var.get() == 'individual' else "Agregado (1 único PDF)"
+            
+            # === VALIDAÇÃO DE DADOS ===
+            warnings = []
+            rows_with_issues = []
+            
+            # Campos importantes que devem ter valor
+            important_fields = ['Cliente', 'SIGLA', 'TOTAL']
+            
+            for idx, item in enumerate(itens):
+                row_issues = []
+                
+                # Verificar Cliente vazio
+                cliente = item.get('Cliente', '')
+                if not cliente or str(cliente).strip() == '':
+                    row_issues.append("Cliente vazio")
+                
+                # Verificar SIGLA vazia
+                sigla = item.get('SIGLA', '')
+                if not sigla or str(sigla).strip() == '':
+                    row_issues.append("SIGLA vazia")
+                
+                # Verificar TOTAL = 0 ou vazio
+                total = item.get('TOTAL', 0)
+                if total == 0 or total == '' or total is None:
+                    row_issues.append("TOTAL é 0 ou vazio")
+                
+                # Verificar valores negativos inesperados
+                for field in ['CONTAB', 'Subtotal']:
+                    val = item.get(field, 0)
+                    if isinstance(val, (int, float)) and val < 0:
+                        row_issues.append(f"{field} negativo")
+                
+                if row_issues:
+                    nr = item.get('Nr.', idx + 1)
+                    # Mostrar identificação mais clara: Nr + SIGLA ou Cliente
+                    sigla_display = item.get('SIGLA', '') or ''
+                    cliente_display = item.get('Cliente', '') or ''
+                    
+                    if sigla_display:
+                        identificador = f"{nr} ({sigla_display})"
+                    elif cliente_display:
+                        # Truncar nome se muito longo
+                        nome_curto = cliente_display[:25] + "..." if len(cliente_display) > 25 else cliente_display
+                        identificador = f"{nr} - {nome_curto}"
+                    else:
+                        identificador = str(nr)
+                    
+                    warnings.append(f"{identificador}: {', '.join(row_issues)}")
+                    rows_with_issues.append(idx)
+            
+            summary_text = f"📊 Total de registos: {len(itens)}  |  📋 Colunas: {len(all_cols)}  |  📅 Mês: {mes_ref}  |  📄 Modo: {mode_text}"
+            ttk.Label(summary_frame, text=summary_text, font=('Helvetica', 10)).pack(anchor='w')
+            
+            # Mostrar alertas de validação (se houver)
+            if warnings:
+                warning_frame = ttk.LabelFrame(main_frame, text=f"⚠️ Alertas de Validação ({len(warnings)})", padding=10)
+                warning_frame.pack(fill='x', pady=(0, 10))
+                
+                # Mostrar até 5 avisos
+                warning_display = warnings[:5]
+                warning_text = "\n".join(warning_display)
+                warning_label = ttk.Label(warning_frame, text=warning_text, foreground='#b45309', 
+                                         font=('Helvetica', 9), justify='left')
+                warning_label.pack(anchor='w')
+                
+                # Se houver mais de 5, mostrar link clicável
+                if len(warnings) > 5:
+                    # Capturar warnings numa variável local para o closure
+                    all_warnings_list = list(warnings)
+                    
+                    def show_all_warnings(warnings_to_show=all_warnings_list):
+                        """Mostra todos os alertas numa janela popup."""
+                        popup = tk.Toplevel(preview_window)
+                        popup.title(f"Todos os Alertas ({len(warnings_to_show)})")
+                        popup.geometry("600x400")
+                        popup.transient(preview_window)
+                        
+                        # Frame principal
+                        popup_frame = tk.Frame(popup, bg='#fffbeb', padx=10, pady=10)
+                        popup_frame.pack(fill='both', expand=True)
+                        
+                        # Label título
+                        tk.Label(popup_frame, text=f"⚠️ {len(warnings_to_show)} alertas encontrados:", 
+                                font=('Helvetica', 11, 'bold'), bg='#fffbeb', fg='#92400e').pack(anchor='w', pady=(0, 10))
+                        
+                        # Frame para lista + scrollbar
+                        list_frame = tk.Frame(popup_frame, bg='#fffbeb')
+                        list_frame.pack(fill='both', expand=True)
+                        
+                        # Scrollbar
+                        scrollbar = tk.Scrollbar(list_frame)
+                        scrollbar.pack(side='right', fill='y')
+                        
+                        # Listbox (mais fiável que Text widget)
+                        listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set,
+                                            font=('Helvetica', 10), fg='#92400e', bg='#fffbeb',
+                                            selectbackground='#fcd34d', highlightthickness=0,
+                                            relief='flat', activestyle='none')
+                        listbox.pack(side='left', fill='both', expand=True)
+                        scrollbar.config(command=listbox.yview)
+                        
+                        # Inserir todos os warnings
+                        for i, w in enumerate(warnings_to_show, 1):
+                            listbox.insert('end', f"  {i}. {w}")
+                        
+                        # Botão fechar
+                        tk.Button(popup_frame, text="Fechar", command=popup.destroy, 
+                                 bg='#f59e0b', fg='white', font=('Helvetica', 10),
+                                 padx=20, pady=5, relief='flat', cursor='hand2').pack(pady=(10, 0))
+                        
+                        popup.grab_set()
+                        popup.update()
+                    
+                    # Link clicável
+                    more_link = tk.Label(warning_frame, text=f"👆 Ver todos os {len(warnings)} alertas...", 
+                                        fg='#2563eb', cursor='hand2', font=('Helvetica', 9, 'underline'))
+                    more_link.pack(anchor='w', pady=(5, 0))
+                    more_link.bind('<Button-1>', lambda e: show_all_warnings())
+                
+                ttk.Label(warning_frame, text="ℹ️ Pode gerar os PDFs mesmo com alertas.", 
+                         foreground='gray', font=('Helvetica', 8)).pack(anchor='w', pady=(5, 0))
+            
+            # Criar Treeview para mostrar dados
+            tree_frame = ttk.Frame(main_frame)
+            tree_frame.pack(fill='both', expand=True)
+            
+            # Scrollbars
+            y_scroll = ttk.Scrollbar(tree_frame, orient='vertical')
+            y_scroll.pack(side='right', fill='y')
+            
+            x_scroll = ttk.Scrollbar(tree_frame, orient='horizontal')
+            x_scroll.pack(side='bottom', fill='x')
+            
+            # Ordenar colunas
+            col_order = ['Nr.', 'SIGLA', 'Cliente', 'CONTAB', 'Iva', 'Subtotal', 'Extras', 
+                        'Duodécimos', 'S.Social GER', 'S.Soc Emp', 'Ret. IRS', 'Ret. IRS EXT',
+                        'SbTx/Fcomp', 'Outro', 'TOTAL']
+            columns = [c for c in col_order if c in all_cols]
+            columns += [c for c in all_cols if c not in columns]
+            
+            tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                               yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+            
+            y_scroll.config(command=tree.yview)
+            x_scroll.config(command=tree.xview)
+            
+            # Configurar colunas
+            for col in columns:
+                tree.heading(col, text=col)
+                # Largura baseada no tipo de coluna
+                if col == 'Cliente':
+                    tree.column(col, width=200, minwidth=100)
+                elif col in ['Nr.', 'SIGLA']:
+                    tree.column(col, width=60, minwidth=40)
+                else:
+                    tree.column(col, width=80, minwidth=50)
+            
+            # Tags para linhas com problemas
+            tree.tag_configure('warning', background='#fef3c7')
+            tree.tag_configure('normal', background='white')
+            
+            # Inserir dados
+            for idx, item in enumerate(itens):
+                values = []
+                for col in columns:
+                    val = item.get(col, '')
+                    if isinstance(val, (int, float)) and col not in ['Nr.']:
+                        if val != 0:
+                            values.append(f"{val:.2f}€" if col in ['CONTAB', 'Iva', 'Subtotal', 
+                                         'Extras', 'Duodécimos', 'S.Social GER', 'S.Soc Emp',
+                                         'Ret. IRS', 'Ret. IRS EXT', 'SbTx/Fcomp', 'Outro', 'TOTAL'] else str(val))
+                        else:
+                            values.append('')
+                    else:
+                        values.append(str(val) if val else '')
+                
+                # Aplicar tag de warning se linha tem problemas
+                tag = 'warning' if idx in rows_with_issues else 'normal'
+                tree.insert('', 'end', values=values, tags=(tag,))
+            
+            tree.pack(fill='both', expand=True)
+            
+            # Botões
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.pack(fill='x', pady=(10, 0))
+            
+            def generate_and_close():
+                preview_window.destroy()
+                self._generate()
+            
+            ttk.Button(btn_frame, text="✅ Gerar PDF(s)", 
+                      command=generate_and_close).pack(side='right', padx=5)
+            ttk.Button(btn_frame, text="❌ Cancelar", 
+                      command=preview_window.destroy).pack(side='right', padx=5)
+            
+            self.status_var.set("Pré-visualização aberta")
+            
+        except Exception as e:
+            self.status_var.set("❌ Erro na pré-visualização")
+            messagebox.showerror("Erro", f"Erro ao carregar pré-visualização:\n\n{str(e)}")
     
     def run(self):
         """Inicia a aplicação."""
