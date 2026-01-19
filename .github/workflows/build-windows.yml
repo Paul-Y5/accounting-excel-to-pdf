@@ -46,6 +46,6 @@ jobs:
       with:
         files: dist/ConversorExcelPDF.exe
         generate_release_notes: true
-        name: "Conversor Excel → PDF ${{ github.ref_name }}"
+        name: "Conversor Excel para PDF ${{ github.ref_name }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
