@@ -72,6 +72,10 @@ DEFAULT_CONFIG = {
         'title': 'Nossos Dados Bancários:',
         'bank_name': 'ABANCA',
         'iban': 'PT50 0170 3782 0304 0053 5672 9',
+    },
+    'recent': {
+        'last_excel_dir': '',
+        'last_output_dir': '',
     }
 }
 
