@@ -12,6 +12,9 @@ from tkinter import ttk, filedialog, messagebox, colorchooser
 
 from src.config import load_config, save_config, DEFAULT_CONFIG
 from src.converter import ExcelToPDFConverter
+from src.nif_validator import validate_nif
+from src.excel_exporter import export_to_excel
+from src import history
 class ConverterApp:
     """Aplicação principal com interface gráfica simples para conversão de Excel para PDF."""
     
@@ -77,6 +80,11 @@ class ConverterApp:
         self.tab_banking = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_banking, text='Dados Bancários')
         self._setup_banking_tab()
+
+        # Tab 8: Histórico
+        self.tab_history = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_history, text='Histórico')
+        self._setup_history_tab()
     
     def _setup_convert_tab(self):
         """Tab de conversão."""
@@ -126,15 +134,19 @@ class ConverterApp:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=30)
         
-        preview_btn = ttk.Button(btn_frame, text="👁 Pré-visualizar", 
+        preview_btn = ttk.Button(btn_frame, text="Pré-visualizar",
                                 command=self._preview_excel, style='TButton')
         preview_btn.pack(side='left', padx=5)
-        
-        generate_btn = ttk.Button(btn_frame, text="Gerar PDF(s)", 
+
+        generate_btn = ttk.Button(btn_frame, text="Gerar PDF(s)",
                                  command=self._generate, style='TButton')
         generate_btn.pack(side='left', padx=5)
-        
-        ttk.Button(btn_frame, text="Guardar Configurações", 
+
+        export_excel_btn = ttk.Button(btn_frame, text="Exportar Excel",
+                                      command=self._export_excel, style='TButton')
+        export_excel_btn.pack(side='left', padx=5)
+
+        ttk.Button(btn_frame, text="Guardar Configurações",
                   command=self._save_config).pack(side='left', padx=5)
         
         # Status
@@ -445,23 +457,38 @@ class ConverterApp:
                 self.color_vars[f'{key}_btn'].configure(bg=color[1])
     
     def _browse_excel(self):
-        """Seleciona ficheiro Excel."""
+        """Seleciona ficheiro Excel, lembrando a última pasta usada."""
+        initial_dir = self.config.get('recent', {}).get('last_excel_dir', '')
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser('~')
+
         path = filedialog.askopenfilename(
             title="Selecionar ficheiro Excel",
+            initialdir=initial_dir,
             filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
         )
         if path:
             self.excel_path.set(path)
+            # Guardar última pasta
+            self.config.setdefault('recent', {})['last_excel_dir'] = os.path.dirname(path)
+            save_config(self.config)
     
     def _browse_output(self):
-        """Seleciona ficheiro de saída."""
+        """Seleciona ficheiro de saída, lembrando a última pasta."""
+        initial_dir = self.config.get('recent', {}).get('last_output_dir', '')
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser('~')
+
         path = filedialog.asksaveasfilename(
             title="Guardar PDF como",
+            initialdir=initial_dir,
             defaultextension=".pdf",
             filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")]
         )
         if path:
             self.output_path.set(path)
+            self.config.setdefault('recent', {})['last_output_dir'] = os.path.dirname(path)
+            save_config(self.config)
     
     def _browse_logo(self):
         """Seleciona ficheiro de logo."""
@@ -530,7 +557,8 @@ class ConverterApp:
                 'title': self.banking_title_var.get() if hasattr(self, 'banking_title_var') else 'Nossos Dados Bancários:',
                 'bank_name': self.bank_name_var.get() if hasattr(self, 'bank_name_var') else 'ABANCA',
                 'iban': self.iban_var.get() if hasattr(self, 'iban_var') else 'PT50 0170 3782 0304 0053 5672 9',
-            }
+            },
+            'recent': self.config.get('recent', {'last_excel_dir': '', 'last_output_dir': ''}),
         }
     
     def _save_config(self):
@@ -568,24 +596,30 @@ class ConverterApp:
             output_path = self.output_path.get() or None
             
             converter = ExcelToPDFConverter(excel_path, output_path, config)
+            data = converter.read_excel_data()
+            clients_count = len(data.get('itens', []))
             result_path = converter.generate_pdf()
-            
-            self.status_var.set(f"✅ PDF gerado: {os.path.basename(result_path)}")
-            
-            messagebox.showinfo("Sucesso", f"PDF gerado com sucesso!\n\n{result_path}")
-            
+
+            self.status_var.set(f"PDF gerado: {os.path.basename(result_path)} ({clients_count} clientes)")
+
+            # Registar no histórico
+            history.add_entry(excel_path, result_path, 'aggregate', clients_count, True)
+
+            messagebox.showinfo("Sucesso",
+                f"PDF gerado com sucesso!\n\n{result_path}\n\nClientes: {clients_count}")
+
             # Abrir PDF
             if config['output'].get('auto_open', True):
-                import subprocess
                 if sys.platform == 'linux':
                     subprocess.Popen(['xdg-open', result_path])
                 elif sys.platform == 'darwin':
                     subprocess.Popen(['open', result_path])
                 else:
                     os.startfile(result_path)
-                    
+
         except Exception as e:
-            self.status_var.set("❌ Erro na conversão")
+            self.status_var.set("Erro na conversão")
+            history.add_entry(excel_path, output_path or '', 'aggregate', 0, False, str(e))
             messagebox.showerror("Erro", f"Erro durante a conversão:\n\n{str(e)}")
     
     def _convert_individual(self):
@@ -608,18 +642,20 @@ class ConverterApp:
             
             converter = ExcelToPDFConverter(excel_path, None, config)
             result_files = converter.generate_individual_pdfs()
-            
+
             if result_files:
                 folder = os.path.dirname(result_files[0])
-                self.status_var.set(f"✅ {len(result_files)} PDFs gerados!")
-                
-                messagebox.showinfo("Sucesso", 
+                self.status_var.set(f"{len(result_files)} PDFs gerados!")
+
+                # Registar no histórico
+                history.add_entry(excel_path, folder, 'individual', len(result_files), True)
+
+                messagebox.showinfo("Sucesso",
                     f"Gerados {len(result_files)} PDFs individuais!\n\n"
                     f"Pasta: {folder}")
-                
+
                 # Abrir pasta de destino
                 if config['output'].get('auto_open', True):
-                    import subprocess
                     if sys.platform == 'linux':
                         subprocess.Popen(['xdg-open', folder])
                     elif sys.platform == 'darwin':
@@ -627,11 +663,12 @@ class ConverterApp:
                     else:
                         os.startfile(folder)
             else:
-                self.status_var.set("❌ Nenhum PDF gerado")
+                self.status_var.set("Nenhum PDF gerado")
                 messagebox.showwarning("Aviso", "Nenhum item encontrado para gerar PDFs.")
-                
+
         except Exception as e:
-            self.status_var.set("❌ Erro na conversão")
+            self.status_var.set("Erro na conversão")
+            history.add_entry(excel_path, '', 'individual', 0, False, str(e))
             messagebox.showerror("Erro", f"Erro durante a geração:\n\n{str(e)}")
     
     def _preview_excel(self):
@@ -687,28 +724,32 @@ class ConverterApp:
             # === VALIDAÇÃO DE DADOS ===
             warnings = []
             rows_with_issues = []
-            
-            # Campos importantes que devem ter valor
-            important_fields = ['Cliente', 'SIGLA', 'TOTAL']
-            
+
             for idx, item in enumerate(itens):
                 row_issues = []
-                
+
                 # Verificar Cliente vazio
                 cliente = item.get('Cliente', '')
                 if not cliente or str(cliente).strip() == '':
                     row_issues.append("Cliente vazio")
-                
+
                 # Verificar SIGLA vazia
                 sigla = item.get('SIGLA', '')
                 if not sigla or str(sigla).strip() == '':
                     row_issues.append("SIGLA vazia")
-                
+
+                # Validação de NIF
+                nif = item.get('NIF', '')
+                if nif and str(nif).strip():
+                    is_valid, nif_msg = validate_nif(str(nif))
+                    if not is_valid:
+                        row_issues.append(f"NIF inválido ({nif_msg})")
+
                 # Verificar TOTAL = 0 ou vazio
                 total = item.get('TOTAL', 0)
                 if total == 0 or total == '' or total is None:
                     row_issues.append("TOTAL é 0 ou vazio")
-                
+
                 # Verificar valores negativos inesperados
                 for field in ['CONTAB', 'Subtotal']:
                     val = item.get(field, 0)
@@ -884,6 +925,147 @@ class ConverterApp:
             self.status_var.set("❌ Erro na pré-visualização")
             messagebox.showerror("Erro", f"Erro ao carregar pré-visualização:\n\n{str(e)}")
     
+    def _setup_history_tab(self):
+        """Tab de histórico de conversões."""
+        frame = ttk.Frame(self.tab_history, padding=20)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text="Histórico de Conversões", style='Header.TLabel').pack(pady=(0, 10))
+
+        # Treeview
+        tree_frame = ttk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+
+        y_scroll = ttk.Scrollbar(tree_frame, orient='vertical')
+        y_scroll.pack(side='right', fill='y')
+
+        columns = ('data', 'ficheiro', 'modo', 'clientes', 'resultado')
+        self.history_tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
+                                         yscrollcommand=y_scroll.set)
+        y_scroll.config(command=self.history_tree.yview)
+
+        self.history_tree.heading('data', text='Data/Hora')
+        self.history_tree.heading('ficheiro', text='Ficheiro')
+        self.history_tree.heading('modo', text='Modo')
+        self.history_tree.heading('clientes', text='Clientes')
+        self.history_tree.heading('resultado', text='Resultado')
+
+        self.history_tree.column('data', width=140, minwidth=120)
+        self.history_tree.column('ficheiro', width=250, minwidth=150)
+        self.history_tree.column('modo', width=100, minwidth=80)
+        self.history_tree.column('clientes', width=70, minwidth=50)
+        self.history_tree.column('resultado', width=80, minwidth=60)
+
+        self.history_tree.tag_configure('success', foreground='#38A169')
+        self.history_tree.tag_configure('error', foreground='#E53E3E')
+
+        self.history_tree.pack(fill='both', expand=True)
+
+        # Botões
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=(10, 0))
+
+        ttk.Button(btn_frame, text="Atualizar", command=self._refresh_history).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Limpar Histórico", command=self._clear_history).pack(side='left', padx=5)
+
+        self._refresh_history()
+
+    def _refresh_history(self):
+        """Atualiza a lista de histórico."""
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
+
+        entries = history.get_history(limit=100)
+        for entry in entries:
+            try:
+                dt = entry['timestamp'][:16].replace('T', ' ')
+            except (KeyError, TypeError):
+                dt = '?'
+
+            tag = 'success' if entry.get('success', False) else 'error'
+            mode_label = 'Individual' if entry.get('mode') == 'individual' else 'Agregado'
+            result_label = 'OK' if entry.get('success', False) else 'Erro'
+
+            self.history_tree.insert('', 'end', values=(
+                dt,
+                entry.get('source_file', '?'),
+                mode_label,
+                entry.get('clients_count', 0),
+                result_label,
+            ), tags=(tag,))
+
+    def _clear_history(self):
+        """Limpa o histórico de conversões."""
+        if messagebox.askyesno("Confirmar", "Tem a certeza que deseja limpar todo o histórico?"):
+            history.clear_history()
+            self._refresh_history()
+
+    def _export_excel(self):
+        """Exporta os dados para Excel formatado."""
+        excel_path = self.excel_path.get()
+
+        if not excel_path:
+            messagebox.showerror("Erro", "Por favor, selecione um ficheiro Excel.")
+            return
+
+        if not os.path.exists(excel_path):
+            messagebox.showerror("Erro", f"Ficheiro não encontrado: {excel_path}")
+            return
+
+        # Escolher destino
+        initial_dir = self.config.get('recent', {}).get('last_output_dir', os.path.dirname(excel_path))
+        base_name = os.path.splitext(os.path.basename(excel_path))[0]
+
+        output_path = filedialog.asksaveasfilename(
+            title="Guardar Excel formatado como",
+            initialdir=initial_dir,
+            initialfile=f"{base_name}_formatado.xlsx",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
+        )
+
+        if not output_path:
+            return
+
+        try:
+            self.status_var.set("A exportar Excel...")
+            self.root.update()
+
+            config = self._get_config_from_ui()
+            converter = ExcelToPDFConverter(excel_path, None, config)
+            data = converter.read_excel_data()
+
+            result_path = export_to_excel(data, output_path, config)
+            clients_count = len(data.get('itens', []))
+
+            self.status_var.set(f"Excel exportado: {os.path.basename(result_path)} ({clients_count} clientes)")
+
+            # Registar no histórico
+            history.add_entry(excel_path, result_path, 'excel_export', clients_count, True)
+
+            # Guardar última pasta
+            self.config.setdefault('recent', {})['last_output_dir'] = os.path.dirname(output_path)
+            save_config(self.config)
+
+            messagebox.showinfo("Sucesso",
+                f"Excel formatado gerado com sucesso!\n\n"
+                f"{result_path}\n\n"
+                f"Clientes: {clients_count}")
+
+            # Abrir ficheiro
+            if config['output'].get('auto_open', True):
+                if sys.platform == 'linux':
+                    subprocess.Popen(['xdg-open', result_path])
+                elif sys.platform == 'darwin':
+                    subprocess.Popen(['open', result_path])
+                else:
+                    os.startfile(result_path)
+
+        except Exception as e:
+            self.status_var.set("Erro na exportação Excel")
+            history.add_entry(excel_path, output_path, 'excel_export', 0, False, str(e))
+            messagebox.showerror("Erro", f"Erro durante a exportação:\n\n{str(e)}")
+
     def run(self):
         """Inicia a aplicação."""
         self.root.mainloop()
