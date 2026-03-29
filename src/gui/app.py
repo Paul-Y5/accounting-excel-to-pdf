@@ -117,23 +117,50 @@ class ConverterApp:
                        variable=self.auto_open_var).pack(anchor='w')
         
         self.add_timestamp_var = tk.BooleanVar(value=self.config['output']['add_timestamp'])
-        ttk.Checkbutton(options_frame, text="Adicionar data/hora ao nome do ficheiro", 
+        ttk.Checkbutton(options_frame, text="Adicionar data/hora ao nome do ficheiro",
                        variable=self.add_timestamp_var).pack(anchor='w')
-        
+
+        # Segurança
+        security_frame = ttk.LabelFrame(frame, text="Segurança", padding=10)
+        security_frame.pack(fill='x', pady=5)
+
+        pw_row = ttk.Frame(security_frame)
+        pw_row.pack(fill='x')
+        ttk.Label(pw_row, text="Password PDF:").pack(side='left')
+        self.pdf_password_var = tk.StringVar(value=self.config.get('security', {}).get('pdf_password', ''))
+        ttk.Entry(pw_row, textvariable=self.pdf_password_var, width=20, show='*').pack(side='left', padx=5)
+
+        wm_row = ttk.Frame(security_frame)
+        wm_row.pack(fill='x', pady=(5, 0))
+        self.watermark_enabled_var = tk.BooleanVar(value=self.config.get('watermark', {}).get('enabled', False))
+        ttk.Checkbutton(wm_row, text="Marca d'água:", variable=self.watermark_enabled_var).pack(side='left')
+        self.watermark_text_var = tk.StringVar(value=self.config.get('watermark', {}).get('text', 'RASCUNHO'))
+        wm_combo = ttk.Combobox(wm_row, textvariable=self.watermark_text_var, width=15,
+                                values=['RASCUNHO', 'CÓPIA', 'CONFIDENCIAL', 'ORIGINAL'])
+        wm_combo.pack(side='left', padx=5)
+
         # Modo de geração
         mode_frame = ttk.LabelFrame(frame, text="Modo de Geração", padding=10)
         mode_frame.pack(fill='x', pady=5)
-        
+
         self.generation_mode_var = tk.StringVar(value='individual')  # Default: por linha
-        ttk.Radiobutton(mode_frame, text="Por Linha (um PDF por cliente)", 
+        ttk.Radiobutton(mode_frame, text="Por Linha (um PDF por cliente)",
                        variable=self.generation_mode_var, value='individual').pack(anchor='w')
-        ttk.Radiobutton(mode_frame, text="Agregado (todos num único PDF)", 
+        ttk.Radiobutton(mode_frame, text="Agregado (todos num único PDF)",
                        variable=self.generation_mode_var, value='aggregate').pack(anchor='w')
-        
+
+        # Filtro de clientes
+        filter_row = ttk.Frame(mode_frame)
+        filter_row.pack(fill='x', pady=(5, 0))
+        ttk.Button(filter_row, text="Filtrar Clientes...", command=self._open_client_filter).pack(side='left')
+        self.client_filter_label = ttk.Label(filter_row, text="Todos os clientes", foreground='gray')
+        self.client_filter_label.pack(side='left', padx=10)
+        self._client_filter = None  # None = todos, set() = filtrados
+
         # Botões
         btn_frame = ttk.Frame(frame)
-        btn_frame.pack(pady=30)
-        
+        btn_frame.pack(pady=20)
+
         preview_btn = ttk.Button(btn_frame, text="Pré-visualizar",
                                 command=self._preview_excel, style='TButton')
         preview_btn.pack(side='left', padx=5)
@@ -148,10 +175,17 @@ class ConverterApp:
 
         ttk.Button(btn_frame, text="Guardar Configurações",
                   command=self._save_config).pack(side='left', padx=5)
-        
+
+        # Segunda linha de botões
+        btn_frame2 = ttk.Frame(frame)
+        btn_frame2.pack(pady=(0, 10))
+
+        ttk.Button(btn_frame2, text="Abrir Pasta de Destino",
+                  command=self._open_output_folder).pack(side='left', padx=5)
+
         # Status
         self.status_var = tk.StringVar(value="Pronto para converter")
-        ttk.Label(frame, textvariable=self.status_var, foreground='gray').pack(pady=10)
+        ttk.Label(frame, textvariable=self.status_var, foreground='gray').pack(pady=5)
     
     def _setup_pdf_tab(self):
         """Tab de configurações do PDF."""
@@ -409,45 +443,237 @@ class ConverterApp:
         ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
     def _setup_banking_tab(self):
-        """Tab de configurações de dados bancários."""
+        """Tab de configurações de dados bancários (múltiplas contas)."""
         frame = ttk.Frame(self.tab_banking, padding=20)
         frame.pack(fill='both', expand=True)
-        
+
         # Título
         ttk.Label(frame, text="Dados Bancários", style='Header.TLabel').pack(pady=(0, 15))
-        
-        # Descrição
-        desc_text = "Configure os dados bancários que aparecerão no rodapé do PDF."
+
+        desc_text = "Configure as contas bancárias que aparecerão no rodapé do PDF.\nA conta marcada como predefinida será usada na geração."
         ttk.Label(frame, text=desc_text, foreground='gray').pack(pady=(0, 10))
-        
+
         # Mostrar dados bancários
         banking_cfg = self.config.get('banking', {})
         self.show_banking_var = tk.BooleanVar(value=banking_cfg.get('show_banking', True))
-        ttk.Checkbutton(frame, text="Mostrar dados bancários no PDF", 
+        ttk.Checkbutton(frame, text="Mostrar dados bancários no PDF",
                        variable=self.show_banking_var).pack(anchor='w', pady=5)
-        
-        # Dados do banco
-        bank_frame = ttk.LabelFrame(frame, text="Informação Bancária", padding=10)
-        bank_frame.pack(fill='x', pady=10)
-        
+
+        # Título bancário
+        title_row = ttk.Frame(frame)
+        title_row.pack(fill='x', pady=5)
+        ttk.Label(title_row, text="Título:").pack(side='left')
         self.banking_title_var = tk.StringVar(value=banking_cfg.get('title', 'Nossos Dados Bancários:'))
-        self.bank_name_var = tk.StringVar(value=banking_cfg.get('bank_name', 'ABANCA'))
-        self.iban_var = tk.StringVar(value=banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9'))
-        
-        ttk.Label(bank_frame, text="Título:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        ttk.Entry(bank_frame, textvariable=self.banking_title_var, width=40).grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-        
-        ttk.Label(bank_frame, text="Nome do Banco:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        ttk.Entry(bank_frame, textvariable=self.bank_name_var, width=40).grid(row=1, column=1, sticky='ew', padx=5, pady=5)
-        
-        ttk.Label(bank_frame, text="IBAN:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
-        ttk.Entry(bank_frame, textvariable=self.iban_var, width=40).grid(row=2, column=1, sticky='ew', padx=5, pady=5)
-        
-        bank_frame.columnconfigure(1, weight=1)
-        
+        ttk.Entry(title_row, textvariable=self.banking_title_var, width=40).pack(side='left', padx=5)
+
+        # Lista de contas
+        accounts_frame = ttk.LabelFrame(frame, text="Contas Bancárias", padding=10)
+        accounts_frame.pack(fill='both', expand=True, pady=10)
+
+        # Treeview para contas
+        tree_frame = ttk.Frame(accounts_frame)
+        tree_frame.pack(fill='both', expand=True)
+
+        cols = ('banco', 'iban', 'predefinida')
+        self.accounts_tree = ttk.Treeview(tree_frame, columns=cols, show='headings', height=5)
+        self.accounts_tree.heading('banco', text='Banco')
+        self.accounts_tree.heading('iban', text='IBAN')
+        self.accounts_tree.heading('predefinida', text='Predefinida')
+        self.accounts_tree.column('banco', width=120)
+        self.accounts_tree.column('iban', width=300)
+        self.accounts_tree.column('predefinida', width=80)
+        self.accounts_tree.pack(fill='both', expand=True)
+
+        # Carregar contas existentes
+        accounts = banking_cfg.get('accounts', [])
+        for acc in accounts:
+            default_mark = 'Sim' if acc.get('default', False) else ''
+            self.accounts_tree.insert('', 'end', values=(
+                acc.get('bank_name', ''),
+                acc.get('iban', ''),
+                default_mark,
+            ))
+
+        # Botões de gestão de contas
+        acc_btn_frame = ttk.Frame(accounts_frame)
+        acc_btn_frame.pack(fill='x', pady=(10, 0))
+
+        ttk.Button(acc_btn_frame, text="Adicionar", command=self._add_bank_account).pack(side='left', padx=5)
+        ttk.Button(acc_btn_frame, text="Remover", command=self._remove_bank_account).pack(side='left', padx=5)
+        ttk.Button(acc_btn_frame, text="Definir como Predefinida", command=self._set_default_account).pack(side='left', padx=5)
+
         # Botão Guardar
         ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
     
+    def _add_bank_account(self):
+        """Adiciona uma nova conta bancária via popup."""
+        popup = tk.Toplevel(self.root)
+        popup.title("Adicionar Conta Bancária")
+        popup.geometry("400x180")
+        popup.transient(self.root)
+        popup.grab_set()
+
+        f = ttk.Frame(popup, padding=15)
+        f.pack(fill='both', expand=True)
+
+        ttk.Label(f, text="Nome do Banco:").grid(row=0, column=0, sticky='w', pady=5)
+        bank_var = tk.StringVar()
+        ttk.Entry(f, textvariable=bank_var, width=35).grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(f, text="IBAN:").grid(row=1, column=0, sticky='w', pady=5)
+        iban_var = tk.StringVar()
+        ttk.Entry(f, textvariable=iban_var, width=35).grid(row=1, column=1, padx=5, pady=5)
+
+        def confirm():
+            bank = bank_var.get().strip()
+            iban = iban_var.get().strip()
+            if not bank or not iban:
+                messagebox.showwarning("Aviso", "Preencha o nome do banco e o IBAN.", parent=popup)
+                return
+            self.accounts_tree.insert('', 'end', values=(bank, iban, ''))
+            popup.destroy()
+
+        ttk.Button(f, text="Adicionar", command=confirm).grid(row=2, column=1, sticky='e', pady=15)
+
+    def _remove_bank_account(self):
+        """Remove a conta bancária selecionada."""
+        selected = self.accounts_tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione uma conta para remover.")
+            return
+        for item in selected:
+            self.accounts_tree.delete(item)
+
+    def _set_default_account(self):
+        """Define a conta selecionada como predefinida."""
+        selected = self.accounts_tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione uma conta para definir como predefinida.")
+            return
+        # Limpar todas as marcas de predefinida
+        for item in self.accounts_tree.get_children():
+            vals = list(self.accounts_tree.item(item, 'values'))
+            vals[2] = ''
+            self.accounts_tree.item(item, values=vals)
+        # Marcar a selecionada
+        vals = list(self.accounts_tree.item(selected[0], 'values'))
+        vals[2] = 'Sim'
+        self.accounts_tree.item(selected[0], values=vals)
+
+    def _open_client_filter(self):
+        """Abre janela para selecionar clientes a incluir no PDF."""
+        excel_path = self.excel_path.get()
+        if not excel_path or not os.path.exists(excel_path):
+            messagebox.showerror("Erro", "Selecione um ficheiro Excel primeiro.")
+            return
+
+        try:
+            config = self._get_config_from_ui()
+            converter = ExcelToPDFConverter(excel_path, None, config)
+            data = converter.read_excel_data()
+            itens = data.get('itens', [])
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao ler Excel:\n{e}")
+            return
+
+        if not itens:
+            messagebox.showwarning("Aviso", "Sem dados no Excel.")
+            return
+
+        # Obter lista de clientes únicos
+        clients = []
+        seen = set()
+        for item in itens:
+            name = item.get('Cliente', '')
+            if name and name not in seen:
+                clients.append(name)
+                seen.add(name)
+
+        # Popup de seleção
+        popup = tk.Toplevel(self.root)
+        popup.title("Filtrar Clientes")
+        popup.geometry("450x500")
+        popup.transient(self.root)
+        popup.grab_set()
+
+        f = ttk.Frame(popup, padding=10)
+        f.pack(fill='both', expand=True)
+
+        ttk.Label(f, text=f"{len(clients)} clientes encontrados. Selecione os que deseja incluir:",
+                 font=('Helvetica', 10)).pack(anchor='w', pady=(0, 10))
+
+        # Botões selecionar/desselecionar todos
+        sel_frame = ttk.Frame(f)
+        sel_frame.pack(fill='x', pady=(0, 5))
+
+        check_vars = {}
+        list_frame = ttk.Frame(f)
+        list_frame.pack(fill='both', expand=True)
+
+        canvas = tk.Canvas(list_frame)
+        scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=canvas.yview)
+        scroll_content = ttk.Frame(canvas)
+
+        scroll_content.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.create_window((0, 0), window=scroll_content, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+
+        for client in clients:
+            var = tk.BooleanVar(value=(self._client_filter is None or client in self._client_filter))
+            check_vars[client] = var
+            ttk.Checkbutton(scroll_content, text=client, variable=var).pack(anchor='w', padx=5, pady=1)
+
+        def select_all():
+            for v in check_vars.values():
+                v.set(True)
+
+        def deselect_all():
+            for v in check_vars.values():
+                v.set(False)
+
+        ttk.Button(sel_frame, text="Selecionar Todos", command=select_all).pack(side='left', padx=5)
+        ttk.Button(sel_frame, text="Desselecionar Todos", command=deselect_all).pack(side='left', padx=5)
+
+        def apply_filter():
+            selected = {name for name, var in check_vars.items() if var.get()}
+            if len(selected) == len(clients):
+                self._client_filter = None
+                self.client_filter_label.config(text="Todos os clientes")
+            elif len(selected) == 0:
+                messagebox.showwarning("Aviso", "Selecione pelo menos um cliente.", parent=popup)
+                return
+            else:
+                self._client_filter = selected
+                self.client_filter_label.config(text=f"{len(selected)} de {len(clients)} clientes")
+            popup.destroy()
+
+        btn_frame = ttk.Frame(f)
+        btn_frame.pack(fill='x', pady=(10, 0))
+        ttk.Button(btn_frame, text="Aplicar", command=apply_filter).pack(side='right', padx=5)
+        ttk.Button(btn_frame, text="Cancelar", command=popup.destroy).pack(side='right', padx=5)
+
+    def _open_output_folder(self):
+        """Abre a pasta de destino no explorador de ficheiros."""
+        output_path = self.output_path.get()
+        if output_path:
+            folder = os.path.dirname(output_path)
+        else:
+            folder = self.config.get('recent', {}).get('last_output_dir', '')
+
+        if not folder or not os.path.isdir(folder):
+            messagebox.showinfo("Info", "Nenhuma pasta de destino definida.\nGere um PDF primeiro ou defina o caminho de saída.")
+            return
+
+        if sys.platform == 'linux':
+            subprocess.Popen(['xdg-open', folder])
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', folder])
+        else:
+            os.startfile(folder)
+
     def _pick_color(self, key, var):
         """Abre seletor de cor."""
         color = colorchooser.askcolor(initialcolor=var.get())
@@ -552,15 +778,38 @@ class ConverterApp:
                 'destacar_total': self.contab_destacar_total_var.get() if hasattr(self, 'contab_destacar_total_var') else True,
                 'destacar_valores': self.contab_destacar_valores_var.get() if hasattr(self, 'contab_destacar_valores_var') else True,
             },
-            'banking': {
-                'show_banking': self.show_banking_var.get() if hasattr(self, 'show_banking_var') else True,
-                'title': self.banking_title_var.get() if hasattr(self, 'banking_title_var') else 'Nossos Dados Bancários:',
-                'bank_name': self.bank_name_var.get() if hasattr(self, 'bank_name_var') else 'ABANCA',
-                'iban': self.iban_var.get() if hasattr(self, 'iban_var') else 'PT50 0170 3782 0304 0053 5672 9',
+            'security': {
+                'pdf_password': self.pdf_password_var.get() if hasattr(self, 'pdf_password_var') else '',
+                'pdf_owner_password': '',
             },
+            'watermark': {
+                'enabled': self.watermark_enabled_var.get() if hasattr(self, 'watermark_enabled_var') else False,
+                'text': self.watermark_text_var.get() if hasattr(self, 'watermark_text_var') else 'RASCUNHO',
+                'opacity': 0.1,
+            },
+            'banking': self._get_banking_from_ui(),
             'recent': self.config.get('recent', {'last_excel_dir': '', 'last_output_dir': ''}),
         }
     
+    def _get_banking_from_ui(self) -> dict:
+        """Lê as contas bancárias do Treeview."""
+        accounts = []
+        if hasattr(self, 'accounts_tree'):
+            for item in self.accounts_tree.get_children():
+                vals = self.accounts_tree.item(item, 'values')
+                accounts.append({
+                    'bank_name': vals[0],
+                    'iban': vals[1],
+                    'default': vals[2] == 'Sim',
+                })
+        if not accounts:
+            accounts = [{'bank_name': 'ABANCA', 'iban': 'PT50 0170 3782 0304 0053 5672 9', 'default': True}]
+        return {
+            'show_banking': self.show_banking_var.get() if hasattr(self, 'show_banking_var') else True,
+            'title': self.banking_title_var.get() if hasattr(self, 'banking_title_var') else 'Nossos Dados Bancários:',
+            'accounts': accounts,
+        }
+
     def _save_config(self):
         """Guarda configurações."""
         self.config = self._get_config_from_ui()
@@ -577,28 +826,36 @@ class ConverterApp:
             self._convert()
     
     def _convert(self):
-        """Executa a conversão."""
+        """Executa a conversão (modo agregado)."""
         excel_path = self.excel_path.get()
-        
+
         if not excel_path:
             messagebox.showerror("Erro", "Por favor, selecione um ficheiro Excel.")
             return
-        
+
         if not os.path.exists(excel_path):
             messagebox.showerror("Erro", f"Ficheiro não encontrado: {excel_path}")
             return
-        
+
         try:
             self.status_var.set("A converter...")
             self.root.update()
-            
+
             config = self._get_config_from_ui()
             output_path = self.output_path.get() or None
-            
+
             converter = ExcelToPDFConverter(excel_path, output_path, config)
+
+            # Confirmar sobrescrita
+            if os.path.exists(converter.output_pdf_path):
+                if not messagebox.askyesno("Confirmar",
+                        f"O ficheiro já existe:\n{converter.output_pdf_path}\n\nDeseja substituir?"):
+                    self.status_var.set("Conversão cancelada")
+                    return
+
             data = converter.read_excel_data()
             clients_count = len(data.get('itens', []))
-            result_path = converter.generate_pdf()
+            result_path = converter.generate_pdf(client_filter=self._client_filter)
 
             self.status_var.set(f"PDF gerado: {os.path.basename(result_path)} ({clients_count} clientes)")
 
@@ -641,7 +898,7 @@ class ConverterApp:
             config = self._get_config_from_ui()
             
             converter = ExcelToPDFConverter(excel_path, None, config)
-            result_files = converter.generate_individual_pdfs()
+            result_files = converter.generate_individual_pdfs(client_filter=self._client_filter)
 
             if result_files:
                 folder = os.path.dirname(result_files[0])

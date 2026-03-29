@@ -144,8 +144,11 @@ def export_to_excel(data: dict, output_path: str, config: dict) -> str:
     last_data_row = start_row + len(itens) + 1
     banking_cfg = config.get('banking', {})
     if banking_cfg.get('show_banking', True):
-        bank_name = banking_cfg.get('bank_name', '')
-        iban = banking_cfg.get('iban', '')
+        # Suporte a múltiplas contas: usar a conta predefinida
+        accounts = banking_cfg.get('accounts', [])
+        active = next((a for a in accounts if a.get('default')), accounts[0] if accounts else {})
+        bank_name = active.get('bank_name', '')
+        iban = active.get('iban', '')
 
         ws.cell(row=last_data_row + 1, column=1, value='Dados Bancários:').font = Font(name='Calibri', size=9, bold=True)
         ws.cell(row=last_data_row + 2, column=1, value=f'{bank_name} — IBAN: {iban}').font = Font(name='Calibri', size=9, color='4A5568')

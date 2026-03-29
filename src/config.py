@@ -67,11 +67,25 @@ DEFAULT_CONFIG = {
         'destacar_total': True,
         'destacar_valores': True,
     },
+    'security': {
+        'pdf_password': '',
+        'pdf_owner_password': '',
+    },
+    'watermark': {
+        'enabled': False,
+        'text': 'RASCUNHO',
+        'opacity': 0.1,
+    },
     'banking': {
         'show_banking': True,
         'title': 'Nossos Dados Bancários:',
-        'bank_name': 'ABANCA',
-        'iban': 'PT50 0170 3782 0304 0053 5672 9',
+        'accounts': [
+            {
+                'bank_name': 'ABANCA',
+                'iban': 'PT50 0170 3782 0304 0053 5672 9',
+                'default': True,
+            }
+        ],
     },
     'recent': {
         'last_excel_dir': '',
@@ -123,7 +137,26 @@ def load_config() -> dict:
                 config = copy.deepcopy(DEFAULT_CONFIG)
                 for section, values in saved_config.items():
                     if section in config:
-                        config[section].update(values)
+                        if isinstance(values, dict):
+                            config[section].update(values)
+                        else:
+                            config[section] = values
+
+                # Migrar banking antigo (bank_name/iban flat) para accounts list
+                banking = config.get('banking', {})
+                if 'accounts' not in banking and 'bank_name' in banking:
+                    config['banking'] = {
+                        'show_banking': banking.get('show_banking', True),
+                        'title': banking.get('title', 'Nossos Dados Bancários:'),
+                        'accounts': [
+                            {
+                                'bank_name': banking.get('bank_name', ''),
+                                'iban': banking.get('iban', ''),
+                                'default': True,
+                            }
+                        ],
+                    }
+
                 return config
         except Exception:
             pass
