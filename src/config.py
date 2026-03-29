@@ -163,6 +163,87 @@ def load_config() -> dict:
     return copy.deepcopy(DEFAULT_CONFIG)
 
 
+def get_profiles_dir() -> str:
+    """Retorna o diretório de perfis de configuração."""
+    profiles_dir = os.path.join(get_config_dir(), 'profiles')
+    os.makedirs(profiles_dir, exist_ok=True)
+    return profiles_dir
+
+
+def list_profiles() -> list:
+    """Lista os nomes dos perfis guardados."""
+    profiles_dir = get_profiles_dir()
+    profiles = []
+    for f in sorted(os.listdir(profiles_dir)):
+        if f.endswith('.json'):
+            profiles.append(f[:-5])  # Remove .json
+    return profiles
+
+
+def save_profile(name: str, config: dict) -> bool:
+    """Guarda uma configuração como perfil.
+
+    Args:
+        name: Nome do perfil.
+        config: Configuração a guardar.
+
+    Returns:
+        True se guardou com sucesso.
+    """
+    path = os.path.join(get_profiles_dir(), f'{name}.json')
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+
+def load_profile(name: str) -> dict:
+    """Carrega um perfil de configuração.
+
+    Args:
+        name: Nome do perfil.
+
+    Returns:
+        Configuração do perfil ou None se não existir.
+    """
+    path = os.path.join(get_profiles_dir(), f'{name}.json')
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            saved = json.load(f)
+        # Merge com defaults
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        for section, values in saved.items():
+            if section in config:
+                if isinstance(values, dict):
+                    config[section].update(values)
+                else:
+                    config[section] = values
+        return config
+    except Exception:
+        return None
+
+
+def delete_profile(name: str) -> bool:
+    """Apaga um perfil de configuração.
+
+    Args:
+        name: Nome do perfil.
+
+    Returns:
+        True se apagou com sucesso.
+    """
+    path = os.path.join(get_profiles_dir(), f'{name}.json')
+    try:
+        os.remove(path)
+        return True
+    except Exception:
+        return False
+
+
 def save_config(config: dict) -> bool:
     """Guarda configurações no ficheiro JSON.
     

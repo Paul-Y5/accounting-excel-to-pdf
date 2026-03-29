@@ -7,10 +7,11 @@ Módulo de interface gráfica do Conversor Excel → PDF.
 import os
 import sys
 import subprocess
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 
-from src.config import load_config, save_config, DEFAULT_CONFIG
+from src.config import load_config, save_config, DEFAULT_CONFIG, list_profiles, save_profile, load_profile, delete_profile
 from src.converter import ExcelToPDFConverter
 from src.nif_validator import validate_nif
 from src.excel_exporter import export_to_excel
@@ -33,7 +34,45 @@ class ConverterApp:
         
         self._setup_ui()
         self._load_config_to_ui()
-    
+        self._setup_keyboard_shortcuts()
+        self._setup_drag_drop()
+
+    def _setup_keyboard_shortcuts(self):
+        """Configura atalhos de teclado globais."""
+        self.root.bind('<Control-o>', lambda e: self._browse_excel())
+        self.root.bind('<Control-g>', lambda e: self._generate())
+        self.root.bind('<Control-s>', lambda e: self._save_config())
+        self.root.bind('<Control-e>', lambda e: self._export_excel())
+        self.root.bind('<Control-p>', lambda e: self._preview_excel())
+
+    def _setup_drag_drop(self):
+        """Configura drag & drop de ficheiros Excel."""
+        try:
+            self.root.tk.call('package', 'require', 'tkdnd')
+            self._has_tkdnd = True
+        except tk.TclError:
+            self._has_tkdnd = False
+
+        if self._has_tkdnd:
+            self.root.tk.call('tkdnd::drop_target', 'register', str(self.root), ('DND_Files',))
+            self.root.tk.call('bind', str(self.root), '<<Drop:DND_Files>>', self.root.register(self._on_drop))
+        else:
+            # Fallback: aceitar ficheiros via evento de ficheiro (funcional em todos os OS)
+            pass
+
+    def _on_drop(self, event_data):
+        """Processa ficheiro largado via drag & drop."""
+        # tkdnd pode envolver o path em {} se tiver espaços
+        path = event_data.strip().strip('{}')
+        if path.lower().endswith(('.xlsx', '.xls')):
+            self.excel_path.set(path)
+            self.config.setdefault('recent', {})['last_excel_dir'] = os.path.dirname(path)
+            save_config(self.config)
+            self.status_var.set(f"Ficheiro carregado: {os.path.basename(path)}")
+        else:
+            messagebox.showwarning("Aviso", "Apenas ficheiros Excel (.xlsx, .xls) são suportados.")
+        return event_data
+
     def _setup_ui(self):
         """Configura a interface."""
         # Estilo
@@ -81,7 +120,12 @@ class ConverterApp:
         self.notebook.add(self.tab_banking, text='Dados Bancários')
         self._setup_banking_tab()
 
-        # Tab 8: Histórico
+        # Tab 8: Perfis
+        self.tab_profiles = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_profiles, text='Perfis')
+        self._setup_profiles_tab()
+
+        # Tab 9: Histórico
         self.tab_history = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_history, text='Histórico')
         self._setup_history_tab()
@@ -182,9 +226,16 @@ class ConverterApp:
 
         ttk.Button(btn_frame2, text="Abrir Pasta de Destino",
                   command=self._open_output_folder).pack(side='left', padx=5)
+        ttk.Button(btn_frame2, text="Resumo IRS",
+                  command=self._show_irs_summary).pack(side='left', padx=5)
+
+        # Barra de progresso
+        self.progress_var = tk.DoubleVar(value=0)
+        self.progress_bar = ttk.Progressbar(frame, variable=self.progress_var, maximum=100, mode='determinate')
+        self.progress_bar.pack(fill='x', pady=(5, 0))
 
         # Status
-        self.status_var = tk.StringVar(value="Pronto para converter")
+        self.status_var = tk.StringVar(value="Pronto para converter  |  Ctrl+O: Abrir  Ctrl+G: Gerar  Ctrl+S: Guardar")
         ttk.Label(frame, textvariable=self.status_var, foreground='gray').pack(pady=5)
     
     def _setup_pdf_tab(self):
@@ -837,96 +888,119 @@ class ConverterApp:
             messagebox.showerror("Erro", f"Ficheiro não encontrado: {excel_path}")
             return
 
-        try:
-            self.status_var.set("A converter...")
-            self.root.update()
+        config = self._get_config_from_ui()
+        output_path = self.output_path.get() or None
 
-            config = self._get_config_from_ui()
-            output_path = self.output_path.get() or None
+        converter = ExcelToPDFConverter(excel_path, output_path, config)
 
-            converter = ExcelToPDFConverter(excel_path, output_path, config)
+        # Confirmar sobrescrita
+        if os.path.exists(converter.output_pdf_path):
+            if not messagebox.askyesno("Confirmar",
+                    f"O ficheiro já existe:\n{converter.output_pdf_path}\n\nDeseja substituir?"):
+                self.status_var.set("Conversão cancelada")
+                return
 
-            # Confirmar sobrescrita
-            if os.path.exists(converter.output_pdf_path):
-                if not messagebox.askyesno("Confirmar",
-                        f"O ficheiro já existe:\n{converter.output_pdf_path}\n\nDeseja substituir?"):
-                    self.status_var.set("Conversão cancelada")
-                    return
+        self.progress_var.set(10)
+        self.status_var.set("A ler dados do Excel...")
+        self.root.update()
 
-            data = converter.read_excel_data()
-            clients_count = len(data.get('itens', []))
-            result_path = converter.generate_pdf(client_filter=self._client_filter)
+        def task():
+            try:
+                data = converter.read_excel_data()
+                self.root.after(0, lambda: self.progress_var.set(40))
+                clients_count = len(data.get('itens', []))
 
-            self.status_var.set(f"PDF gerado: {os.path.basename(result_path)} ({clients_count} clientes)")
+                self.root.after(0, lambda: self.status_var.set("A gerar PDF..."))
+                self.root.after(0, lambda: self.progress_var.set(60))
+                result_path = converter.generate_pdf(client_filter=self._client_filter)
 
-            # Registar no histórico
-            history.add_entry(excel_path, result_path, 'aggregate', clients_count, True)
+                self.root.after(0, lambda: self.progress_var.set(100))
+                self.root.after(0, lambda: self.status_var.set(
+                    f"PDF gerado: {os.path.basename(result_path)} ({clients_count} clientes)"))
 
-            messagebox.showinfo("Sucesso",
-                f"PDF gerado com sucesso!\n\n{result_path}\n\nClientes: {clients_count}")
+                history.add_entry(excel_path, result_path, 'aggregate', clients_count, True)
 
-            # Abrir PDF
-            if config['output'].get('auto_open', True):
-                if sys.platform == 'linux':
-                    subprocess.Popen(['xdg-open', result_path])
-                elif sys.platform == 'darwin':
-                    subprocess.Popen(['open', result_path])
-                else:
-                    os.startfile(result_path)
+                self.root.after(0, lambda: messagebox.showinfo("Sucesso",
+                    f"PDF gerado com sucesso!\n\n{result_path}\n\nClientes: {clients_count}"))
 
-        except Exception as e:
-            self.status_var.set("Erro na conversão")
-            history.add_entry(excel_path, output_path or '', 'aggregate', 0, False, str(e))
-            messagebox.showerror("Erro", f"Erro durante a conversão:\n\n{str(e)}")
+                if config['output'].get('auto_open', True):
+                    if sys.platform == 'linux':
+                        subprocess.Popen(['xdg-open', result_path])
+                    elif sys.platform == 'darwin':
+                        subprocess.Popen(['open', result_path])
+                    else:
+                        os.startfile(result_path)
+
+                self.root.after(1500, lambda: self.progress_var.set(0))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.progress_var.set(0))
+                self.root.after(0, lambda: self.status_var.set("Erro na conversão"))
+                history.add_entry(excel_path, output_path or '', 'aggregate', 0, False, str(e))
+                self.root.after(0, lambda: messagebox.showerror("Erro",
+                    f"Erro durante a conversão:\n\n{str(e)}"))
+
+        threading.Thread(target=task, daemon=True).start()
     
     def _convert_individual(self):
         """Gera PDFs individuais para cada cliente."""
         excel_path = self.excel_path.get()
-        
+
         if not excel_path:
             messagebox.showerror("Erro", "Por favor, selecione um ficheiro Excel.")
             return
-        
+
         if not os.path.exists(excel_path):
             messagebox.showerror("Erro", f"Ficheiro não encontrado: {excel_path}")
             return
-        
-        try:
-            self.status_var.set("A gerar PDFs individuais...")
-            self.root.update()
-            
-            config = self._get_config_from_ui()
-            
-            converter = ExcelToPDFConverter(excel_path, None, config)
-            result_files = converter.generate_individual_pdfs(client_filter=self._client_filter)
 
-            if result_files:
-                folder = os.path.dirname(result_files[0])
-                self.status_var.set(f"{len(result_files)} PDFs gerados!")
+        config = self._get_config_from_ui()
+        self.progress_var.set(10)
+        self.status_var.set("A gerar PDFs individuais...")
+        self.root.update()
 
-                # Registar no histórico
-                history.add_entry(excel_path, folder, 'individual', len(result_files), True)
+        def task():
+            try:
+                converter = ExcelToPDFConverter(excel_path, None, config)
 
-                messagebox.showinfo("Sucesso",
-                    f"Gerados {len(result_files)} PDFs individuais!\n\n"
-                    f"Pasta: {folder}")
+                self.root.after(0, lambda: self.progress_var.set(30))
+                result_files = converter.generate_individual_pdfs(client_filter=self._client_filter)
 
-                # Abrir pasta de destino
-                if config['output'].get('auto_open', True):
-                    if sys.platform == 'linux':
-                        subprocess.Popen(['xdg-open', folder])
-                    elif sys.platform == 'darwin':
-                        subprocess.Popen(['open', folder])
-                    else:
-                        os.startfile(folder)
-            else:
-                self.status_var.set("Nenhum PDF gerado")
-                messagebox.showwarning("Aviso", "Nenhum item encontrado para gerar PDFs.")
+                self.root.after(0, lambda: self.progress_var.set(100))
 
-        except Exception as e:
-            self.status_var.set("Erro na conversão")
-            history.add_entry(excel_path, '', 'individual', 0, False, str(e))
-            messagebox.showerror("Erro", f"Erro durante a geração:\n\n{str(e)}")
+                if result_files:
+                    folder = os.path.dirname(result_files[0])
+                    self.root.after(0, lambda: self.status_var.set(
+                        f"{len(result_files)} PDFs gerados!"))
+
+                    history.add_entry(excel_path, folder, 'individual', len(result_files), True)
+
+                    self.root.after(0, lambda: messagebox.showinfo("Sucesso",
+                        f"Gerados {len(result_files)} PDFs individuais!\n\n"
+                        f"Pasta: {folder}"))
+
+                    if config['output'].get('auto_open', True):
+                        if sys.platform == 'linux':
+                            subprocess.Popen(['xdg-open', folder])
+                        elif sys.platform == 'darwin':
+                            subprocess.Popen(['open', folder])
+                        else:
+                            os.startfile(folder)
+                else:
+                    self.root.after(0, lambda: self.status_var.set("Nenhum PDF gerado"))
+                    self.root.after(0, lambda: messagebox.showwarning("Aviso",
+                        "Nenhum item encontrado para gerar PDFs."))
+
+                self.root.after(1500, lambda: self.progress_var.set(0))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.progress_var.set(0))
+                self.root.after(0, lambda: self.status_var.set("Erro na conversão"))
+                history.add_entry(excel_path, '', 'individual', 0, False, str(e))
+                self.root.after(0, lambda: messagebox.showerror("Erro",
+                    f"Erro durante a geração:\n\n{str(e)}"))
+
+        threading.Thread(target=task, daemon=True).start()
     
     def _preview_excel(self):
         """Mostra pré-visualização dos dados do Excel antes de gerar PDF."""
@@ -1182,6 +1256,228 @@ class ConverterApp:
             self.status_var.set("❌ Erro na pré-visualização")
             messagebox.showerror("Erro", f"Erro ao carregar pré-visualização:\n\n{str(e)}")
     
+    def _setup_profiles_tab(self):
+        """Tab de gestão de perfis de configuração."""
+        frame = ttk.Frame(self.tab_profiles, padding=20)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text="Perfis de Configuração", style='Header.TLabel').pack(pady=(0, 10))
+        ttk.Label(frame, text="Guarde diferentes configurações como perfis reutilizáveis.",
+                 foreground='gray').pack(pady=(0, 10))
+
+        # Lista de perfis
+        list_frame = ttk.LabelFrame(frame, text="Perfis Guardados", padding=10)
+        list_frame.pack(fill='both', expand=True, pady=5)
+
+        self.profiles_listbox = tk.Listbox(list_frame, height=8, font=('Helvetica', 10))
+        self.profiles_listbox.pack(fill='both', expand=True)
+
+        # Botões
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=10)
+
+        ttk.Button(btn_frame, text="Guardar Perfil Atual", command=self._save_profile).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Carregar Perfil", command=self._load_profile).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Apagar Perfil", command=self._delete_profile).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Atualizar Lista", command=self._refresh_profiles).pack(side='right', padx=5)
+
+        self._refresh_profiles()
+
+    def _refresh_profiles(self):
+        """Atualiza a lista de perfis."""
+        self.profiles_listbox.delete(0, tk.END)
+        for name in list_profiles():
+            self.profiles_listbox.insert(tk.END, name)
+
+    def _save_profile(self):
+        """Guarda a configuração atual como perfil."""
+        popup = tk.Toplevel(self.root)
+        popup.title("Guardar Perfil")
+        popup.geometry("350x120")
+        popup.transient(self.root)
+        popup.grab_set()
+
+        f = ttk.Frame(popup, padding=15)
+        f.pack(fill='both', expand=True)
+
+        ttk.Label(f, text="Nome do perfil:").pack(anchor='w')
+        name_var = tk.StringVar()
+        ttk.Entry(f, textvariable=name_var, width=40).pack(fill='x', pady=5)
+
+        def confirm():
+            name = name_var.get().strip()
+            if not name:
+                messagebox.showwarning("Aviso", "Introduza um nome para o perfil.", parent=popup)
+                return
+            config = self._get_config_from_ui()
+            save_profile(name, config)
+            popup.destroy()
+            self._refresh_profiles()
+            messagebox.showinfo("Sucesso", f"Perfil '{name}' guardado!")
+
+        ttk.Button(f, text="Guardar", command=confirm).pack(anchor='e', pady=5)
+
+    def _load_profile(self):
+        """Carrega o perfil selecionado."""
+        sel = self.profiles_listbox.curselection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Selecione um perfil para carregar.")
+            return
+        name = self.profiles_listbox.get(sel[0])
+        config = load_profile(name)
+        if config:
+            self.config = config
+            # Recarregar UI com nova config
+            self._reload_config_to_ui()
+            messagebox.showinfo("Sucesso", f"Perfil '{name}' carregado!")
+        else:
+            messagebox.showerror("Erro", f"Não foi possível carregar o perfil '{name}'.")
+
+    def _delete_profile(self):
+        """Apaga o perfil selecionado."""
+        sel = self.profiles_listbox.curselection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Selecione um perfil para apagar.")
+            return
+        name = self.profiles_listbox.get(sel[0])
+        if messagebox.askyesno("Confirmar", f"Apagar o perfil '{name}'?"):
+            delete_profile(name)
+            self._refresh_profiles()
+
+    def _reload_config_to_ui(self):
+        """Recarrega os valores da config atual para todos os widgets da UI."""
+        cfg = self.config
+        # PDF
+        self.page_size_var.set(cfg['pdf']['page_size'])
+        self.orientation_var.set(cfg['pdf']['orientation'])
+        self.margin_top_var.set(cfg['pdf']['margin_top'])
+        self.margin_bottom_var.set(cfg['pdf']['margin_bottom'])
+        self.margin_left_var.set(cfg['pdf']['margin_left'])
+        self.margin_right_var.set(cfg['pdf']['margin_right'])
+        # Header
+        self.show_header_var.set(cfg['header']['show_header'])
+        self.company_name_var.set(cfg['header']['company_name'])
+        self.company_address_var.set(cfg['header']['company_address'])
+        self.company_phone_var.set(cfg['header']['company_phone'])
+        self.company_email_var.set(cfg['header']['company_email'])
+        self.company_nif_var.set(cfg['header']['company_nif'])
+        self.logo_path_var.set(cfg['header'].get('logo_path', ''))
+        # Table
+        self.font_size_var.set(cfg['table']['font_size'])
+        self.header_font_size_var.set(cfg['table']['header_font_size'])
+        self.row_padding_var.set(cfg['table']['row_padding'])
+        self.show_grid_var.set(cfg['table']['show_grid'])
+        self.alternate_rows_var.set(cfg['table']['alternate_rows'])
+        # Footer
+        self.show_signatures_var.set(cfg['footer']['show_signatures'])
+        self.show_date_var.set(cfg['footer']['show_date'])
+        self.show_observations_var.set(cfg['footer']['show_observations'])
+        self.custom_footer_var.set(cfg['footer'].get('custom_footer', ''))
+        # Output
+        self.auto_open_var.set(cfg['output']['auto_open'])
+        self.add_timestamp_var.set(cfg['output']['add_timestamp'])
+        # Colors
+        for key, var in self.color_vars.items():
+            if not key.endswith('_btn') and key in cfg.get('colors', {}):
+                var.set(cfg['colors'][key])
+        # Contabilidade
+        contab_cfg = cfg.get('contabilidade', {})
+        if hasattr(self, 'contab_colunas_text'):
+            self.contab_colunas_text.delete('1.0', tk.END)
+            self.contab_colunas_text.insert('1.0', contab_cfg.get('colunas', ''))
+        if hasattr(self, 'contab_destacar_total_var'):
+            self.contab_destacar_total_var.set(contab_cfg.get('destacar_total', True))
+        if hasattr(self, 'contab_destacar_valores_var'):
+            self.contab_destacar_valores_var.set(contab_cfg.get('destacar_valores', True))
+        # Security
+        self.pdf_password_var.set(cfg.get('security', {}).get('pdf_password', ''))
+        self.watermark_enabled_var.set(cfg.get('watermark', {}).get('enabled', False))
+        self.watermark_text_var.set(cfg.get('watermark', {}).get('text', 'RASCUNHO'))
+        # Banking
+        self.show_banking_var.set(cfg.get('banking', {}).get('show_banking', True))
+        self.banking_title_var.set(cfg.get('banking', {}).get('title', 'Nossos Dados Bancários:'))
+        # Reload accounts treeview
+        for item in self.accounts_tree.get_children():
+            self.accounts_tree.delete(item)
+        for acc in cfg.get('banking', {}).get('accounts', []):
+            default_mark = 'Sim' if acc.get('default', False) else ''
+            self.accounts_tree.insert('', 'end', values=(
+                acc.get('bank_name', ''), acc.get('iban', ''), default_mark))
+
+    def _show_irs_summary(self):
+        """Mostra resumo de IRS com totais por coluna."""
+        excel_path = self.excel_path.get()
+        if not excel_path or not os.path.exists(excel_path):
+            messagebox.showerror("Erro", "Selecione um ficheiro Excel primeiro.")
+            return
+
+        try:
+            config = self._get_config_from_ui()
+            converter = ExcelToPDFConverter(excel_path, None, config)
+            data = converter.read_excel_data()
+            itens = data.get('itens', [])
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao ler Excel:\n{e}")
+            return
+
+        if not itens:
+            messagebox.showwarning("Aviso", "Sem dados no Excel.")
+            return
+
+        # Calcular totais
+        irs_cols = ['Ret. IRS', 'Ret. IRS EXT']
+        summary_cols = ['CONTAB', 'Iva', 'Subtotal', 'Extras', 'Duodécimos',
+                        'S.Social GER', 'S.Soc Emp', 'Ret. IRS', 'Ret. IRS EXT',
+                        'SbTx/Fcomp', 'Outro', 'TOTAL']
+
+        totals = {}
+        for col in summary_cols:
+            total = sum(item.get(col, 0) for item in itens if isinstance(item.get(col, 0), (int, float)))
+            totals[col] = total
+
+        # Popup
+        popup = tk.Toplevel(self.root)
+        popup.title("Resumo IRS / Totais")
+        popup.geometry("500x450")
+        popup.transient(self.root)
+        popup.grab_set()
+
+        f = ttk.Frame(popup, padding=15)
+        f.pack(fill='both', expand=True)
+
+        mes_ref = data.get('mes_referencia', 'N/A')
+        ttk.Label(f, text=f"Resumo — {mes_ref}", font=('Helvetica', 12, 'bold')).pack(anchor='w', pady=(0, 10))
+        ttk.Label(f, text=f"Total de clientes: {len(itens)}", foreground='gray').pack(anchor='w')
+
+        # Tabela de totais
+        tree_frame = ttk.Frame(f)
+        tree_frame.pack(fill='both', expand=True, pady=10)
+
+        cols = ('coluna', 'total')
+        tree = ttk.Treeview(tree_frame, columns=cols, show='headings', height=12)
+        tree.heading('coluna', text='Coluna')
+        tree.heading('total', text='Total')
+        tree.column('coluna', width=250)
+        tree.column('total', width=150, anchor='e')
+
+        tree.tag_configure('irs', background='#fef3c7', foreground='#92400e')
+        tree.tag_configure('total_row', background='#e2e8f0', font=('Helvetica', 10, 'bold'))
+
+        for col in summary_cols:
+            val = totals[col]
+            val_str = f"{val:,.2f}€" if val != 0 else "-"
+            tag = 'total_row' if col == 'TOTAL' else ('irs' if col in irs_cols else '')
+            tree.insert('', 'end', values=(col, val_str), tags=(tag,) if tag else ())
+
+        tree.pack(fill='both', expand=True)
+
+        # IRS total destacado
+        irs_total = totals.get('Ret. IRS', 0) + totals.get('Ret. IRS EXT', 0)
+        ttk.Label(f, text=f"Total IRS (Ret. IRS + Ret. IRS EXT): {irs_total:,.2f}€",
+                 font=('Helvetica', 11, 'bold'), foreground='#92400e').pack(anchor='w', pady=(5, 0))
+
+        ttk.Button(f, text="Fechar", command=popup.destroy).pack(anchor='e', pady=10)
+
     def _setup_history_tab(self):
         """Tab de histórico de conversões."""
         frame = ttk.Frame(self.tab_history, padding=20)
