@@ -17,51 +17,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.enums import TA_CENTER
 
 from src.config import DEFAULT_CONFIG
-
-
-def _get_active_bank(config: dict) -> dict:
-    """Retorna a conta bancária ativa da configuração."""
-    banking = config.get('banking', {})
-    accounts = banking.get('accounts', [])
-    # Procurar conta default ou devolver a primeira
-    for acc in accounts:
-        if acc.get('default', False):
-            return acc
-    return accounts[0] if accounts else {'bank_name': '', 'iban': ''}
-
-
-def _apply_watermark(canvas, doc, text: str, opacity: float = 0.1):
-    """Desenha marca d'água diagonal no PDF."""
-    canvas.saveState()
-    canvas.setFillColor(colors.Color(0, 0, 0, alpha=opacity))
-    canvas.setFont('Helvetica-Bold', 60)
-    canvas.translate(doc.pagesize[0] / 2, doc.pagesize[1] / 2)
-    canvas.rotate(45)
-    canvas.drawCentredString(0, 0, text)
-    canvas.restoreState()
-
-
-def _apply_pdf_encryption(output_path: str, user_password: str, owner_password: str = ''):
-    """Aplica encriptação ao PDF gerado."""
-    try:
-        from PyPDF2 import PdfReader, PdfWriter
-    except ImportError:
-        raise ImportError(
-            "Para proteger PDFs com password, instale PyPDF2: pip install PyPDF2"
-        )
-
-    reader = PdfReader(output_path)
-    writer = PdfWriter()
-    for page in reader.pages:
-        writer.add_page(page)
-
-    writer.encrypt(
-        user_password=user_password,
-        owner_password=owner_password or user_password,
-    )
-
-    with open(output_path, 'wb') as f:
-        writer.write(f)
 class ExcelToPDFConverter:
     """Classe para converter dados de Excel para PDF formatado."""
     
@@ -674,20 +629,9 @@ class ExcelToPDFConverter:
         
         return elements
 
-    def generate_pdf(self, client_filter: set = None) -> str:
-        """Gera o PDF.
-
-        Args:
-            client_filter: Conjunto de nomes de clientes a incluir (None = todos).
-        """
+    def generate_pdf(self) -> str:
+        """Gera o PDF."""
         data = self.read_excel_data()
-
-        # Filtrar clientes se necessário
-        if client_filter is not None:
-            data['itens'] = [
-                item for item in data.get('itens', [])
-                if item.get('Cliente', '') in client_filter
-            ]
         
         # Verificar se é formato de contabilidade
         primeiro_item = data.get('itens', [{}])[0] if data.get('itens') else {}
@@ -741,16 +685,15 @@ class ExcelToPDFConverter:
             banking_cfg = self.config.get('banking', {})
             
             if banking_cfg.get('show_banking', True):
-                bank = _get_active_bank(self.config)
-                bank_name = bank.get('bank_name', '')
-                iban = bank.get('iban', '')
-
+                bank_name = banking_cfg.get('bank_name', 'ABANCA')
+                iban = banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9')
+                
                 banking_text = f"""<b>Nossos Dados Bancários:</b><br/>
                 {bank_name}<br/>
                 IBAN: {iban}"""
                 elements.append(Paragraph(banking_text, self.styles['NormalText']))
                 elements.append(Spacer(1, 5*mm))
-
+            
             # Data de geração
             footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
             elements.append(Paragraph(footer_text, self.styles['Footer']))
@@ -759,43 +702,15 @@ class ExcelToPDFConverter:
             elements.extend(self.create_document_info(data))
             elements.extend(self.create_items_table(data))
             elements.extend(self.create_footer(data))
-
-        # Marca d'água
-        watermark_cfg = self.config.get('watermark', {})
-        if watermark_cfg.get('enabled', False):
-            wm_text = watermark_cfg.get('text', 'RASCUNHO')
-            wm_opacity = watermark_cfg.get('opacity', 0.1)
-
-            def on_page(canvas, doc):
-                _apply_watermark(canvas, doc, wm_text, wm_opacity)
-
-            doc.build(elements, onFirstPage=on_page, onLaterPages=on_page)
-        else:
-            doc.build(elements)
-
-        # Encriptação com password
-        security_cfg = self.config.get('security', {})
-        pdf_password = security_cfg.get('pdf_password', '')
-        if pdf_password:
-            owner_pw = security_cfg.get('pdf_owner_password', '')
-            _apply_pdf_encryption(self.output_pdf_path, pdf_password, owner_pw)
-
+        
+        doc.build(elements)
+        
         return self.output_pdf_path
 
-    def generate_individual_pdfs(self, output_folder: str = None, client_filter: set = None) -> list:
-        """Gera um PDF individual para cada cliente/linha do Excel.
-
-        Args:
-            output_folder: Pasta de destino (None = auto).
-            client_filter: Conjunto de nomes de clientes a incluir (None = todos).
-        """
+    def generate_individual_pdfs(self, output_folder: str = None) -> list:
+        """Gera um PDF individual para cada cliente/linha do Excel."""
         data = self.read_excel_data()
         itens = data.get('itens', [])
-
-        # Filtrar clientes se necessário
-        if client_filter is not None:
-            itens = [item for item in itens if item.get('Cliente', '') in client_filter]
-            data['itens'] = itens
         mes_ref = data.get('mes_referencia', 'SemMes')
         
         if not itens:
@@ -953,13 +868,12 @@ class ExcelToPDFConverter:
         
         if banking_cfg.get('show_banking', True):
             banking_title = banking_cfg.get('title', 'Nossos Dados Bancários:')
-            bank = _get_active_bank(self.config)
-            bank_name = bank.get('bank_name', '')
-            iban = bank.get('iban', '')
-
+            bank_name = banking_cfg.get('bank_name', 'ABANCA')
+            iban = banking_cfg.get('iban', 'PT50 0170 3782 0304 0053 5672 9')
+            
             # Data atual
             data_atual = datetime.now().strftime('%d/%m/%Y')
-
+            
             banking_text = f"""<b>{banking_title}</b><br/>
             {bank_name}<br/>
             IBAN: {iban}<br/><br/>
@@ -973,44 +887,28 @@ class ExcelToPDFConverter:
         empresa_tel = empresa.get('telefone') or header_cfg.get('company_phone', '')
         empresa_email = empresa.get('email') or header_cfg.get('company_email', '')
         
-        watermark_cfg = self.config.get('watermark', {})
-        wm_enabled = watermark_cfg.get('enabled', False)
-        wm_text = watermark_cfg.get('text', 'RASCUNHO')
-        wm_opacity = watermark_cfg.get('opacity', 0.1)
-
         def add_page_footer(canvas, doc):
             canvas.saveState()
-
-            # Marca d'água
-            if wm_enabled:
-                _apply_watermark(canvas, doc, wm_text, wm_opacity)
-
+            
             # Linha 1: Info da empresa
             empresa_info = f"{empresa_nome}"
             if empresa_tel:
                 empresa_info += f" | Tel: {empresa_tel}"
             if empresa_email:
                 empresa_info += f" | {empresa_email}"
-
+            
             canvas.setFont('Helvetica', 7)
             canvas.setFillColor(colors.HexColor('#718096'))
             canvas.drawCentredString(doc.pagesize[0] / 2, 15*mm, empresa_info)
-
+            
             # Linha 2: Data de geração
             footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
             canvas.setFont('Helvetica', 7)
             canvas.drawCentredString(doc.pagesize[0] / 2, 10*mm, footer_text)
-
+            
             canvas.restoreState()
-
+        
         doc.build(elements, onFirstPage=add_page_footer, onLaterPages=add_page_footer)
-
-        # Encriptação com password
-        security_cfg = self.config.get('security', {})
-        pdf_password = security_cfg.get('pdf_password', '')
-        if pdf_password:
-            owner_pw = security_cfg.get('pdf_owner_password', '')
-            _apply_pdf_encryption(pdf_path, pdf_password, owner_pw)
 
 
 # ============================================
