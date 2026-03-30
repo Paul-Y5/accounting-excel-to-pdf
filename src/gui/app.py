@@ -16,6 +16,7 @@ from src.converter import ExcelToPDFConverter
 from src.nif_validator import validate_nif
 from src.excel_exporter import export_to_excel
 from src import history
+from src.database import init_db, migrate_from_json, update_client_cache, get_cached_clients
 class ConverterApp:
     """Aplicação principal com interface gráfica simples para conversão de Excel para PDF."""
     
@@ -25,6 +26,10 @@ class ConverterApp:
         self.root.geometry("700x600")
         self.root.resizable(True, True)
         
+        # Inicializar base de dados SQLite
+        init_db()
+        migrate_from_json()
+
         # Carregar configurações
         self.config = load_config()
         
@@ -910,6 +915,9 @@ class ConverterApp:
                 self.root.after(0, lambda: self.progress_var.set(40))
                 clients_count = len(data.get('itens', []))
 
+                # Atualizar cache de clientes
+                self._cache_clients_from_data(excel_path, data)
+
                 self.root.after(0, lambda: self.status_var.set("A gerar PDF..."))
                 self.root.after(0, lambda: self.progress_var.set(60))
                 result_path = converter.generate_pdf(client_filter=self._client_filter)
@@ -963,7 +971,11 @@ class ConverterApp:
             try:
                 converter = ExcelToPDFConverter(excel_path, None, config)
 
-                self.root.after(0, lambda: self.progress_var.set(30))
+                self.root.after(0, lambda: self.progress_var.set(20))
+                data = converter.read_excel_data()
+                self._cache_clients_from_data(excel_path, data)
+
+                self.root.after(0, lambda: self.progress_var.set(40))
                 result_files = converter.generate_individual_pdfs(client_filter=self._client_filter)
 
                 self.root.after(0, lambda: self.progress_var.set(100))
@@ -1002,6 +1014,38 @@ class ConverterApp:
 
         threading.Thread(target=task, daemon=True).start()
     
+    def _cache_clients_from_data(self, excel_path: str, data: dict):
+        """Extrai clientes dos dados e atualiza a cache SQLite."""
+        try:
+            itens = data.get('itens', [])
+            headers = data.get('headers', [])
+            # Determinar índices de colunas relevantes
+            h_lower = [h.lower().strip() if h else '' for h in headers]
+            name_idx = None
+            sigla_idx = None
+            nif_idx = None
+            for i, h in enumerate(h_lower):
+                if h == 'cliente':
+                    name_idx = i
+                elif h == 'sigla':
+                    sigla_idx = i
+                elif h == 'nif':
+                    nif_idx = i
+            if name_idx is None:
+                return
+            clients = []
+            for row in itens:
+                name = str(row[name_idx]).strip() if name_idx < len(row) else ''
+                if not name:
+                    continue
+                sigla = str(row[sigla_idx]).strip() if sigla_idx is not None and sigla_idx < len(row) else ''
+                nif = str(row[nif_idx]).strip() if nif_idx is not None and nif_idx < len(row) else ''
+                clients.append({'name': name, 'sigla': sigla, 'nif': nif})
+            if clients:
+                update_client_cache(os.path.basename(excel_path), clients)
+        except Exception:
+            pass  # Cache é best-effort
+
     def _preview_excel(self):
         """Mostra pré-visualização dos dados do Excel antes de gerar PDF."""
         excel_path = self.excel_path.get()
