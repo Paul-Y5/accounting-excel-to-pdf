@@ -30,3 +30,6 @@ config.json
 # Ficheiros de teste
 *.xlsx
 PDFs_*/
+
+# Documentação Cliente
+docs/*
