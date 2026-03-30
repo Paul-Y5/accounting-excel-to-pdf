@@ -2,7 +2,6 @@
 openpyxl==3.1.2
 reportlab==4.0.7
 Pillow==10.1.0
-PyPDF2>=3.0.0
 
 # Dependências para testes
 pytest>=7.0.0
