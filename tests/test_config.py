@@ -27,14 +27,20 @@ class TestDefaultConfig:
     
     def test_banking_section_has_required_keys(self):
         """Verifica que a secção banking tem as chaves necessárias."""
-        required_keys = ['show_banking', 'bank_name', 'iban']
+        required_keys = ['show_banking', 'accounts']
         for key in required_keys:
             assert key in DEFAULT_CONFIG['banking'], f"Chave '{key}' em falta em DEFAULT_CONFIG['banking']"
-    
+        # Verifica que a primeira conta tem as chaves necessárias
+        account_keys = ['bank_name', 'iban', 'default']
+        first_account = DEFAULT_CONFIG['banking']['accounts'][0]
+        for key in account_keys:
+            assert key in first_account, f"Chave '{key}' em falta na primeira conta bancária"
+
     def test_default_banking_values(self):
         """Verifica os valores default dos dados bancários."""
-        assert DEFAULT_CONFIG['banking']['bank_name'] == 'ABANCA'
-        assert 'PT50' in DEFAULT_CONFIG['banking']['iban']
+        first_account = DEFAULT_CONFIG['banking']['accounts'][0]
+        assert first_account['bank_name'] == 'ABANCA'
+        assert 'PT50' in first_account['iban']
 
 
 class TestLoadConfig:
@@ -84,14 +90,14 @@ class TestSaveConfig:
         
         # Modificar config e guardar
         config = copy.deepcopy(DEFAULT_CONFIG)
-        config['banking']['bank_name'] = 'CGD'
-        config['banking']['iban'] = 'PT50 0035 0000 0000 0000 0000 0'
-        
+        config['banking']['accounts'][0]['bank_name'] = 'CGD'
+        config['banking']['accounts'][0]['iban'] = 'PT50 0035 0000 0000 0000 0000 0'
+
         save_config(config)
         loaded_config = load_config()
-        
-        assert loaded_config['banking']['bank_name'] == 'CGD'
-        assert loaded_config['banking']['iban'] == 'PT50 0035 0000 0000 0000 0000 0'
+
+        assert loaded_config['banking']['accounts'][0]['bank_name'] == 'CGD'
+        assert loaded_config['banking']['accounts'][0]['iban'] == 'PT50 0035 0000 0000 0000 0000 0'
 
 
 class TestDeepCopyPrevention:
@@ -99,10 +105,10 @@ class TestDeepCopyPrevention:
     
     def test_modifying_returned_config_does_not_affect_default(self):
         """Verifica que modificar config retornado não afeta DEFAULT_CONFIG."""
-        original_bank = DEFAULT_CONFIG['banking']['bank_name']
-        
+        original_bank = DEFAULT_CONFIG['banking']['accounts'][0]['bank_name']
+
         config = load_config()
-        config['banking']['bank_name'] = 'OUTRO_BANCO'
-        
+        config['banking']['accounts'][0]['bank_name'] = 'OUTRO_BANCO'
+
         # DEFAULT_CONFIG deve manter o valor original
-        assert DEFAULT_CONFIG['banking']['bank_name'] == original_bank
+        assert DEFAULT_CONFIG['banking']['accounts'][0]['bank_name'] == original_bank
