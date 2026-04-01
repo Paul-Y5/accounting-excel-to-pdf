@@ -142,6 +142,75 @@ def clear_history():
         conn.close()
 
 
+def export_history_csv(output_path: str, limit: int = None) -> str:
+    """Exporta o histórico para um ficheiro CSV.
+
+    Args:
+        output_path: Caminho do ficheiro .csv a criar.
+        limit: Número máximo de entradas (None = todas).
+
+    Returns:
+        Caminho do ficheiro criado.
+    """
+    import csv
+
+    entries = get_history(limit=limit or 10000)
+    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        if not entries:
+            return output_path
+        writer = csv.DictWriter(f, fieldnames=list(entries[0].keys()))
+        writer.writeheader()
+        writer.writerows(entries)
+    return output_path
+
+
+def export_history_excel(output_path: str, limit: int = None) -> str:
+    """Exporta o histórico para um ficheiro Excel (.xlsx).
+
+    Args:
+        output_path: Caminho do ficheiro .xlsx a criar.
+        limit: Número máximo de entradas (None = todas).
+
+    Returns:
+        Caminho do ficheiro criado.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    entries = get_history(limit=limit or 10000)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Histórico"
+
+    headers = ['Data/Hora', 'Ficheiro', 'Caminho Origem', 'Saída', 'Modo',
+               'Clientes', 'Sucesso', 'Erro']
+    keys = ['timestamp', 'source_file', 'source_path', 'output_path', 'mode',
+            'clients_count', 'success', 'error']
+
+    header_font = Font(bold=True, color='FFFFFF')
+    header_fill = PatternFill(start_color='2D3748', end_color='2D3748', fill_type='solid')
+    center = Alignment(horizontal='center')
+
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center
+
+    for row_num, entry in enumerate(entries, 2):
+        for col, key in enumerate(keys, 1):
+            ws.cell(row=row_num, column=col, value=entry.get(key, ''))
+
+    # Ajustar largura das colunas
+    col_widths = [18, 30, 45, 45, 12, 10, 8, 40]
+    for col, width in enumerate(col_widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
+
+    wb.save(output_path)
+    return output_path
+
+
 # ============================================
 # PERFIS DE CONFIGURAÇÃO
 # ============================================
