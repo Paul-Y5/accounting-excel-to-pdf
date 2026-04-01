@@ -67,11 +67,29 @@ DEFAULT_CONFIG = {
         'destacar_total': True,
         'destacar_valores': True,
     },
+    'security': {
+        'pdf_password': '',
+        'pdf_owner_password': '',
+    },
+    'watermark': {
+        'enabled': False,
+        'text': 'RASCUNHO',
+        'opacity': 0.1,
+    },
     'banking': {
         'show_banking': True,
         'title': 'Nossos Dados Bancários:',
-        'bank_name': 'ABANCA',
-        'iban': 'PT50 0170 3782 0304 0053 5672 9',
+        'accounts': [
+            {
+                'bank_name': 'ABANCA',
+                'iban': 'PT50 0170 3782 0304 0053 5672 9',
+                'default': True,
+            }
+        ],
+    },
+    'recent': {
+        'last_excel_dir': '',
+        'last_output_dir': '',
     }
 }
 
@@ -119,11 +137,54 @@ def load_config() -> dict:
                 config = copy.deepcopy(DEFAULT_CONFIG)
                 for section, values in saved_config.items():
                     if section in config:
-                        config[section].update(values)
+                        if isinstance(values, dict):
+                            config[section].update(values)
+                        else:
+                            config[section] = values
+
+                # Migrar banking antigo (bank_name/iban flat) para accounts list
+                banking = config.get('banking', {})
+                if 'accounts' not in banking and 'bank_name' in banking:
+                    config['banking'] = {
+                        'show_banking': banking.get('show_banking', True),
+                        'title': banking.get('title', 'Nossos Dados Bancários:'),
+                        'accounts': [
+                            {
+                                'bank_name': banking.get('bank_name', ''),
+                                'iban': banking.get('iban', ''),
+                                'default': True,
+                            }
+                        ],
+                    }
+
                 return config
         except Exception:
             pass
     return copy.deepcopy(DEFAULT_CONFIG)
+
+
+def list_profiles() -> list:
+    """Lista os nomes dos perfis guardados (via SQLite)."""
+    from src.database import list_profiles_db
+    return list_profiles_db()
+
+
+def save_profile(name: str, config: dict) -> bool:
+    """Guarda uma configuração como perfil (via SQLite)."""
+    from src.database import save_profile_db
+    return save_profile_db(name, config)
+
+
+def load_profile(name: str) -> dict:
+    """Carrega um perfil de configuração (via SQLite)."""
+    from src.database import load_profile_db
+    return load_profile_db(name)
+
+
+def delete_profile(name: str) -> bool:
+    """Apaga um perfil de configuração (via SQLite)."""
+    from src.database import delete_profile_db
+    return delete_profile_db(name)
 
 
 def save_config(config: dict) -> bool:
