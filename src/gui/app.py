@@ -17,6 +17,8 @@ from src.nif_validator import validate_nif
 from src.excel_exporter import export_to_excel
 from src import history
 from src.database import init_db, migrate_from_json, update_client_cache, get_cached_clients
+from src.email_sender import open_email_client
+from src.batch_processor import find_excel_files, process_batch
 class ConverterApp:
     """Aplicação principal com interface gráfica simples para conversão de Excel para PDF."""
     
@@ -32,7 +34,10 @@ class ConverterApp:
 
         # Carregar configurações
         self.config = load_config()
-        
+
+        # Últimos PDFs gerados (para envio por email)
+        self._last_generated_files = []
+
         # Variáveis
         self.excel_path = tk.StringVar()
         self.output_path = tk.StringVar()
@@ -130,7 +135,12 @@ class ConverterApp:
         self.notebook.add(self.tab_profiles, text='Perfis')
         self._setup_profiles_tab()
 
-        # Tab 9: Histórico
+        # Tab 9: Lote
+        self.tab_batch = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_batch, text='Multificheiros')
+        self._setup_batch_tab()
+
+        # Tab 10: Histórico
         self.tab_history = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_history, text='Histórico')
         self._setup_history_tab()
@@ -175,7 +185,7 @@ class ConverterApp:
 
         pw_row = ttk.Frame(security_frame)
         pw_row.pack(fill='x')
-        ttk.Label(pw_row, text="Password PDF:").pack(side='left')
+        ttk.Label(pw_row, text="Palavra-passe do PDF:").pack(side='left')
         self.pdf_password_var = tk.StringVar(value=self.config.get('security', {}).get('pdf_password', ''))
         ttk.Entry(pw_row, textvariable=self.pdf_password_var, width=20, show='*').pack(side='left', padx=5)
 
@@ -233,6 +243,9 @@ class ConverterApp:
                   command=self._open_output_folder).pack(side='left', padx=5)
         ttk.Button(btn_frame2, text="Resumo IRS",
                   command=self._show_irs_summary).pack(side='left', padx=5)
+        self.email_btn = ttk.Button(btn_frame2, text="Enviar por Email",
+                                    command=self._send_email, state='disabled')
+        self.email_btn.pack(side='left', padx=5)
 
         # Barra de progresso
         self.progress_var = tk.DoubleVar(value=0)
@@ -691,7 +704,7 @@ class ConverterApp:
                 v.set(False)
 
         ttk.Button(sel_frame, text="Selecionar Todos", command=select_all).pack(side='left', padx=5)
-        ttk.Button(sel_frame, text="Desselecionar Todos", command=deselect_all).pack(side='left', padx=5)
+        ttk.Button(sel_frame, text="Desmarcar Todos", command=deselect_all).pack(side='left', padx=5)
 
         def apply_filter():
             selected = {name for name, var in check_vars.items() if var.get()}
@@ -928,6 +941,9 @@ class ConverterApp:
 
                 history.add_entry(excel_path, result_path, 'aggregate', clients_count, True)
 
+                self._last_generated_files = [result_path]
+                self.root.after(0, lambda: self.email_btn.configure(state='normal'))
+
                 self.root.after(0, lambda: messagebox.showinfo("Sucesso",
                     f"PDF gerado com sucesso!\n\n{result_path}\n\nClientes: {clients_count}"))
 
@@ -986,6 +1002,9 @@ class ConverterApp:
                         f"{len(result_files)} PDFs gerados!"))
 
                     history.add_entry(excel_path, folder, 'individual', len(result_files), True)
+
+                    self._last_generated_files = list(result_files)
+                    self.root.after(0, lambda: self.email_btn.configure(state='normal'))
 
                     self.root.after(0, lambda: messagebox.showinfo("Sucesso",
                         f"Gerados {len(result_files)} PDFs individuais!\n\n"
@@ -1564,6 +1583,8 @@ class ConverterApp:
 
         ttk.Button(btn_frame, text="Atualizar", command=self._refresh_history).pack(side='left', padx=5)
         ttk.Button(btn_frame, text="Limpar Histórico", command=self._clear_history).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Exportar CSV", command=self._export_history_csv).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Exportar Excel", command=self._export_history_excel).pack(side='left', padx=5)
 
         self._refresh_history()
 
@@ -1596,6 +1617,178 @@ class ConverterApp:
         if messagebox.askyesno("Confirmar", "Tem a certeza que deseja limpar todo o histórico?"):
             history.clear_history()
             self._refresh_history()
+
+    def _send_email(self):
+        """Abre o cliente de email com os últimos PDFs gerados em anexo."""
+        if not self._last_generated_files:
+            messagebox.showwarning("Aviso", "Nenhum PDF gerado nesta sessão.")
+            return
+        success, msg = open_email_client(self._last_generated_files)
+        if not success:
+            messagebox.showerror("Erro", msg)
+
+    def _setup_batch_tab(self):
+        """Tab de processamento em lote."""
+        frame = ttk.Frame(self.tab_batch, padding=20)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text="Processamento Multificheiros", style='Header.TLabel').pack(pady=(0, 15))
+
+        # Seleção de pasta
+        folder_frame = ttk.LabelFrame(frame, text="Pasta com ficheiros Excel", padding=10)
+        folder_frame.pack(fill='x', pady=5)
+
+        self.batch_folder_var = tk.StringVar()
+        ttk.Entry(folder_frame, textvariable=self.batch_folder_var, width=55).pack(side='left', fill='x', expand=True)
+        ttk.Button(folder_frame, text="Procurar...", command=self._browse_batch_folder).pack(side='right', padx=(10, 0))
+
+        # Modo de geração
+        mode_frame = ttk.LabelFrame(frame, text="Modo de Geração", padding=10)
+        mode_frame.pack(fill='x', pady=5)
+
+        self.batch_mode_var = tk.StringVar(value='individual')
+        ttk.Radiobutton(mode_frame, text="Por Linha (um PDF por cliente)",
+                        variable=self.batch_mode_var, value='individual').pack(anchor='w')
+        ttk.Radiobutton(mode_frame, text="Agregado (um PDF por ficheiro Excel)",
+                        variable=self.batch_mode_var, value='aggregate').pack(anchor='w')
+
+        # Lista de ficheiros encontrados
+        files_frame = ttk.LabelFrame(frame, text="Ficheiros encontrados", padding=10)
+        files_frame.pack(fill='both', expand=True, pady=5)
+
+        self.batch_files_var = tk.StringVar(value="Selecione uma pasta para ver os ficheiros.")
+        ttk.Label(files_frame, textvariable=self.batch_files_var, foreground='gray',
+                  justify='left').pack(anchor='w')
+
+        # Barra de progresso e status
+        self.batch_progress_var = tk.DoubleVar(value=0)
+        self.batch_progress_bar = ttk.Progressbar(frame, variable=self.batch_progress_var,
+                                                   maximum=100, mode='determinate')
+        self.batch_progress_bar.pack(fill='x', pady=(10, 0))
+
+        self.batch_status_var = tk.StringVar(value="Pronto")
+        ttk.Label(frame, textvariable=self.batch_status_var, foreground='gray').pack(pady=3)
+
+        # Botão
+        self.batch_run_btn = ttk.Button(frame, text="Processar Todos", command=self._run_batch)
+        self.batch_run_btn.pack(pady=5)
+
+    def _browse_batch_folder(self):
+        """Seleciona pasta para processamento em lote."""
+        folder = filedialog.askdirectory(title="Selecionar pasta com ficheiros Excel")
+        if not folder:
+            return
+        self.batch_folder_var.set(folder)
+        try:
+            files = find_excel_files(folder)
+            if files:
+                names = [os.path.basename(f) for f in files]
+                self.batch_files_var.set(f"{len(files)} ficheiro(s):\n" + "\n".join(names))
+            else:
+                self.batch_files_var.set("Nenhum ficheiro Excel encontrado.")
+        except Exception as e:
+            self.batch_files_var.set(f"Erro: {e}")
+
+    def _run_batch(self):
+        """Executa o processamento em lote numa thread."""
+        folder = self.batch_folder_var.get()
+        if not folder:
+            messagebox.showerror("Erro", "Selecione uma pasta.")
+            return
+
+        config = self._get_config_from_ui()
+        mode = self.batch_mode_var.get()
+
+        self.batch_run_btn.configure(state='disabled')
+        self.batch_progress_var.set(0)
+
+        def on_progress(current, total, filename):
+            pct = (current / total) * 100 if total else 0
+            self.root.after(0, lambda: self.batch_progress_var.set(pct))
+            self.root.after(0, lambda: self.batch_status_var.set(
+                f"[{current}/{total}] {filename}"))
+
+        def task():
+            try:
+                results = process_batch(folder, config, mode=mode,
+                                        progress_callback=on_progress)
+
+                ok = sum(1 for r in results if r['success'])
+                fail = len(results) - ok
+
+                # Registar no histórico
+                for r in results:
+                    history.add_entry(r['file'], r['output_path'], f'batch_{mode}',
+                                      r['clients_count'], r['success'], r['error'])
+
+                self.root.after(0, lambda: self.batch_progress_var.set(100))
+                self.root.after(0, lambda: self.batch_status_var.set(
+                    f"Concluído: {ok} com sucesso, {fail} com erro(s)"))
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Processamento concluído",
+                    f"Processados {len(results)} ficheiro(s).\n"
+                    f"Com sucesso: {ok}   Com erros: {fail}"))
+
+                if fail > 0:
+                    erros = "\n".join(
+                        f"{r['filename']}: {r['error']}"
+                        for r in results if not r['success']
+                    )
+                    self.root.after(0, lambda: messagebox.showwarning(
+                        "Ficheiros com erro", erros))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.batch_status_var.set(f"Erro: {e}"))
+                self.root.after(0, lambda: messagebox.showerror("Erro", str(e)))
+            finally:
+                self.root.after(0, lambda: self.batch_run_btn.configure(state='normal'))
+                self.root.after(1500, lambda: self.batch_progress_var.set(0))
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _export_history_csv(self):
+        """Exporta o histórico para CSV."""
+        output = filedialog.asksaveasfilename(
+            title="Exportar histórico como CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile="historico_conversoes.csv",
+        )
+        if not output:
+            return
+        try:
+            history.export_to_csv(output)
+            messagebox.showinfo("Sucesso", f"Histórico exportado:\n{output}")
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', os.path.dirname(output)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', os.path.dirname(output)])
+            else:
+                os.startfile(os.path.dirname(output))
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar:\n{e}")
+
+    def _export_history_excel(self):
+        """Exporta o histórico para Excel."""
+        output = filedialog.asksaveasfilename(
+            title="Exportar histórico como Excel",
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile="historico_conversoes.xlsx",
+        )
+        if not output:
+            return
+        try:
+            history.export_to_excel(output)
+            messagebox.showinfo("Sucesso", f"Histórico exportado:\n{output}")
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', output])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', output])
+            else:
+                os.startfile(output)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar:\n{e}")
 
     def _export_excel(self):
         """Exporta os dados para Excel formatado."""

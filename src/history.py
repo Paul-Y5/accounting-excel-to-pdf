@@ -6,7 +6,10 @@ Regista todas as conversões realizadas para rastreabilidade.
 Utiliza base de dados SQLite para persistência.
 """
 
-from src.database import add_history_entry, get_history as _get_history, clear_history as _clear_history
+from src.database import (add_history_entry, get_history as _get_history,
+                          clear_history as _clear_history,
+                          export_history_csv as _export_csv,
+                          export_history_excel as _export_excel)
 
 
 def add_entry(source_file: str, output_path: str, mode: str,
@@ -39,3 +42,29 @@ def get_history(limit: int = 50) -> list:
 def clear_history():
     """Limpa o histórico."""
     _clear_history()
+
+
+def export_to_csv(output_path: str, limit: int = None) -> str:
+    """Exporta o histórico para CSV.
+
+    Args:
+        output_path: Caminho do ficheiro .csv a criar.
+        limit: Número máximo de entradas (None = todas).
+
+    Returns:
+        Caminho do ficheiro criado.
+    """
+    return _export_csv(output_path, limit)
+
+
+def export_to_excel(output_path: str, limit: int = None) -> str:
+    """Exporta o histórico para Excel (.xlsx).
+
+    Args:
+        output_path: Caminho do ficheiro .xlsx a criar.
+        limit: Número máximo de entradas (None = todas).
+
+    Returns:
+        Caminho do ficheiro criado.
+    """
+    return _export_excel(output_path, limit)
