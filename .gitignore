@@ -33,3 +33,4 @@ PDFs_*/
 
 # Documentação Cliente
 docs/*
+*.local.md

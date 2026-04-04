@@ -20,14 +20,30 @@ from src.database import init_db, migrate_from_json, update_client_cache, get_ca
 from src.email_sender import open_email_client
 from src.batch_processor import find_excel_files, process_batch
 class ConverterApp:
-    """Aplicação principal com interface gráfica simples para conversão de Excel para PDF."""
-    
+    """Aplicação principal com interface gráfica para conversão de Excel para PDF."""
+
+    # Constantes de UI
+    _PAD_OUTER = 12          # padding exterior das tabs
+    _PAD_SECTION = (0, 8)    # espaço vertical entre secções
+    _PAD_INNER = 10          # padding interior dos LabelFrames
+    _FONT_FAMILY = 'Helvetica'
+    _FONT_SIZE = 10
+    _FONT_HEADER = 14
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Conversor Excel → PDF")
-        self.root.geometry("700x600")
+        self.root.geometry("780x640")
+        self.root.minsize(700, 560)
         self.root.resizable(True, True)
-        
+
+        # Tema moderno (Sun Valley)
+        try:
+            import sv_ttk
+            sv_ttk.set_theme('light')
+        except ImportError:
+            pass  # fallback ao tema do sistema
+
         # Inicializar base de dados SQLite
         init_db()
         migrate_from_json()
@@ -41,7 +57,7 @@ class ConverterApp:
         # Variáveis
         self.excel_path = tk.StringVar()
         self.output_path = tk.StringVar()
-        
+
         self._setup_ui()
         self._load_config_to_ui()
         self._setup_keyboard_shortcuts()
@@ -85,240 +101,286 @@ class ConverterApp:
 
     def _setup_ui(self):
         """Configura a interface."""
-        # Estilo
+        # Fonte global
+        default_font = (self._FONT_FAMILY, self._FONT_SIZE)
+        self.root.option_add('*Font', default_font)
+
+        # Estilos ttk
         style = ttk.Style()
-        style.configure('TButton', padding=6)
+        style.configure('TButton', padding=(12, 6))
         style.configure('TLabel', padding=2)
-        style.configure('Header.TLabel', font=('Helvetica', 12, 'bold'))
-        
-        # Notebook (tabs)
+        style.configure('Header.TLabel', font=(self._FONT_FAMILY, self._FONT_HEADER, 'bold'))
+        style.configure('Status.TLabel', font=(self._FONT_FAMILY, 9))
+
+        # Estilo de destaque para o botão principal
+        style.configure('Accent.TButton', padding=(16, 8))
+        style.map('Accent.TButton',
+                  background=[('active', '#005a9e'), ('!active', '#0078D4')],
+                  foreground=[('active', 'white'), ('!active', 'white')])
+
+        # Notebook (tabs) — 5 tabs principais
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        
+        self.notebook.pack(fill='both', expand=True, padx=self._PAD_OUTER, pady=self._PAD_OUTER)
+
         # Tab 1: Conversão
         self.tab_convert = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_convert, text='Converter')
         self._setup_convert_tab()
-        
-        # Tab 2: Configurações PDF
-        self.tab_pdf = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_pdf, text='Página PDF')
-        self._setup_pdf_tab()
-        
-        # Tab 3: Cabeçalho
-        self.tab_header = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_header, text='Cabeçalho')
-        self._setup_header_tab()
-        
-        # Tab 4: Tabela
-        self.tab_table = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_table, text='Tabela')
-        self._setup_table_tab()
-        
-        # Tab 5: Cores
-        self.tab_colors = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_colors, text='Cores')
-        self._setup_colors_tab()
-        
-        # Tab 6: Contabilidade
-        self.tab_contab = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_contab, text='Contabilidade')
-        self._setup_contabilidade_tab()
-        
-        # Tab 7: Dados Bancários
-        self.tab_banking = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_banking, text='Dados Bancários')
-        self._setup_banking_tab()
 
-        # Tab 8: Perfis
+        # Tab 2: Perfis
         self.tab_profiles = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_profiles, text='Perfis')
         self._setup_profiles_tab()
 
-        # Tab 9: Lote
+        # Tab 3: Multificheiros
         self.tab_batch = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_batch, text='Multificheiros')
         self._setup_batch_tab()
 
-        # Tab 10: Histórico
+        # Tab 4: Histórico
         self.tab_history = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_history, text='Histórico')
         self._setup_history_tab()
-    
-    def _setup_convert_tab(self):
-        """Tab de conversão."""
-        frame = ttk.Frame(self.tab_convert, padding=20)
-        frame.pack(fill='both', expand=True)
-        
-        # Título
-        ttk.Label(frame, text="Conversor Excel → PDF", style='Header.TLabel').pack(pady=(0, 20))
-        
-        # Ficheiro Excel
-        file_frame = ttk.LabelFrame(frame, text="Ficheiro Excel", padding=10)
-        file_frame.pack(fill='x', pady=5)
-        
-        ttk.Entry(file_frame, textvariable=self.excel_path, width=60).pack(side='left', fill='x', expand=True)
-        ttk.Button(file_frame, text="Procurar...", command=self._browse_excel).pack(side='right', padx=(10, 0))
-        
-        # Ficheiro de saída
-        output_frame = ttk.LabelFrame(frame, text="Ficheiro PDF de Saída (opcional)", padding=10)
-        output_frame.pack(fill='x', pady=5)
-        
-        ttk.Entry(output_frame, textvariable=self.output_path, width=60).pack(side='left', fill='x', expand=True)
-        ttk.Button(output_frame, text="Procurar...", command=self._browse_output).pack(side='right', padx=(10, 0))
-        
-        # Opções rápidas
-        options_frame = ttk.LabelFrame(frame, text="Opções", padding=10)
-        options_frame.pack(fill='x', pady=5)
-        
-        self.auto_open_var = tk.BooleanVar(value=self.config['output']['auto_open'])
-        ttk.Checkbutton(options_frame, text="Abrir PDF após conversão", 
-                       variable=self.auto_open_var).pack(anchor='w')
-        
-        self.add_timestamp_var = tk.BooleanVar(value=self.config['output']['add_timestamp'])
-        ttk.Checkbutton(options_frame, text="Adicionar data/hora ao nome do ficheiro",
-                       variable=self.add_timestamp_var).pack(anchor='w')
 
-        # Segurança
-        security_frame = ttk.LabelFrame(frame, text="Segurança", padding=10)
-        security_frame.pack(fill='x', pady=5)
+        # Tab 5: Definições (no final)
+        self.tab_settings = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_settings, text='Definições')
+        self._setup_settings_tab()
+    
+    def _setup_settings_tab(self):
+        """Tab de definições com sub-notebook para todas as configurações."""
+        settings_nb = ttk.Notebook(self.tab_settings)
+        settings_nb.pack(fill='both', expand=True, padx=5, pady=5)
+
+        # Sub-tab: Página PDF
+        self.tab_pdf = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_pdf, text='Página PDF')
+        self._setup_pdf_tab()
+
+        # Sub-tab: Cabeçalho
+        self.tab_header = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_header, text='Cabeçalho')
+        self._setup_header_tab()
+
+        # Sub-tab: Tabela e Rodapé
+        self.tab_table = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_table, text='Tabela e Rodapé')
+        self._setup_table_tab()
+
+        # Sub-tab: Cores
+        self.tab_colors = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_colors, text='Cores')
+        self._setup_colors_tab()
+
+        # Sub-tab: Contabilidade
+        self.tab_contab = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_contab, text='Contabilidade')
+        self._setup_contabilidade_tab()
+
+        # Sub-tab: Dados Bancários
+        self.tab_banking = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_banking, text='Dados Bancários')
+        self._setup_banking_tab()
+
+    def _setup_convert_tab(self):
+        """Tab de conversão com scroll."""
+        # Canvas com scrollbar para conteúdo que não cabe na janela
+        canvas = tk.Canvas(self.tab_convert, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.tab_convert, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+
+        frame = ttk.Frame(canvas, padding=self._PAD_OUTER)
+        frame_id = canvas.create_window((0, 0), window=frame, anchor='nw')
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(frame_id, width=event.width)
+
+        frame.bind('<Configure>', _on_frame_configure)
+        canvas.bind('<Configure>', _on_canvas_configure)
+
+        # Scroll com roda do rato (Linux)
+        canvas.bind_all('<Button-4>', lambda e: canvas.yview_scroll(-3, 'units'))
+        canvas.bind_all('<Button-5>', lambda e: canvas.yview_scroll(3, 'units'))
+
+        # --- Barra de progresso e status (topo, sempre visível) ---
+        self.progress_var = tk.DoubleVar(value=0)
+        self.progress_bar = ttk.Progressbar(frame, variable=self.progress_var,
+                                            maximum=100, mode='determinate')
+        self.progress_bar.pack(fill='x', pady=(0, 4))
+
+        self.status_var = tk.StringVar(value="Pronto  |  Ctrl+O: Abrir  Ctrl+G: Gerar  Ctrl+S: Guardar")
+        ttk.Label(frame, textvariable=self.status_var, style='Status.TLabel',
+                  foreground='#666666').pack(pady=(0, 10))
+
+        # --- Ficheiros ---
+        files_frame = ttk.LabelFrame(frame, text="Ficheiros", padding=self._PAD_INNER)
+        files_frame.pack(fill='x', pady=self._PAD_SECTION)
+        files_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(files_frame, text="Excel:").grid(row=0, column=0, sticky='e', padx=(0, 8), pady=4)
+        ttk.Entry(files_frame, textvariable=self.excel_path).grid(row=0, column=1, sticky='ew', pady=4)
+        ttk.Button(files_frame, text="Procurar...", command=self._browse_excel).grid(
+            row=0, column=2, padx=(8, 0), pady=4)
+
+        ttk.Label(files_frame, text="PDF saída:").grid(row=1, column=0, sticky='e', padx=(0, 8), pady=4)
+        ttk.Entry(files_frame, textvariable=self.output_path).grid(row=1, column=1, sticky='ew', pady=4)
+        ttk.Button(files_frame, text="Procurar...", command=self._browse_output).grid(
+            row=1, column=2, padx=(8, 0), pady=4)
+
+        # --- Opções e Segurança lado a lado ---
+        opts_sec_frame = ttk.Frame(frame)
+        opts_sec_frame.pack(fill='x', pady=self._PAD_SECTION)
+
+        options_frame = ttk.LabelFrame(opts_sec_frame, text="Opções", padding=self._PAD_INNER)
+        options_frame.pack(side='left', fill='both', expand=True, padx=(0, 6))
+
+        self.auto_open_var = tk.BooleanVar(value=self.config['output']['auto_open'])
+        ttk.Checkbutton(options_frame, text="Abrir PDF após conversão",
+                       variable=self.auto_open_var).pack(anchor='w', pady=2)
+
+        self.add_timestamp_var = tk.BooleanVar(value=self.config['output']['add_timestamp'])
+        ttk.Checkbutton(options_frame, text="Data/hora no nome do ficheiro",
+                       variable=self.add_timestamp_var).pack(anchor='w', pady=2)
+
+        security_frame = ttk.LabelFrame(opts_sec_frame, text="Segurança", padding=self._PAD_INNER)
+        security_frame.pack(side='left', fill='both', expand=True, padx=(6, 0))
 
         pw_row = ttk.Frame(security_frame)
-        pw_row.pack(fill='x')
-        ttk.Label(pw_row, text="Palavra-passe do PDF:").pack(side='left')
+        pw_row.pack(fill='x', pady=2)
+        ttk.Label(pw_row, text="Palavra-passe:").pack(side='left')
         self.pdf_password_var = tk.StringVar(value=self.config.get('security', {}).get('pdf_password', ''))
-        ttk.Entry(pw_row, textvariable=self.pdf_password_var, width=20, show='*').pack(side='left', padx=5)
+        ttk.Entry(pw_row, textvariable=self.pdf_password_var, width=14, show='*').pack(side='left', padx=(8, 0))
 
         wm_row = ttk.Frame(security_frame)
-        wm_row.pack(fill='x', pady=(5, 0))
+        wm_row.pack(fill='x', pady=2)
         self.watermark_enabled_var = tk.BooleanVar(value=self.config.get('watermark', {}).get('enabled', False))
         ttk.Checkbutton(wm_row, text="Marca d'água:", variable=self.watermark_enabled_var).pack(side='left')
         self.watermark_text_var = tk.StringVar(value=self.config.get('watermark', {}).get('text', 'RASCUNHO'))
-        wm_combo = ttk.Combobox(wm_row, textvariable=self.watermark_text_var, width=15,
-                                values=['RASCUNHO', 'CÓPIA', 'CONFIDENCIAL', 'ORIGINAL'])
-        wm_combo.pack(side='left', padx=5)
+        ttk.Combobox(wm_row, textvariable=self.watermark_text_var, width=13,
+                     values=['RASCUNHO', 'CÓPIA', 'CONFIDENCIAL', 'ORIGINAL']).pack(side='left', padx=(8, 0))
 
-        # Modo de geração
-        mode_frame = ttk.LabelFrame(frame, text="Modo de Geração", padding=10)
-        mode_frame.pack(fill='x', pady=5)
+        # --- Modo de geração ---
+        mode_frame = ttk.LabelFrame(frame, text="Modo de Geração", padding=self._PAD_INNER)
+        mode_frame.pack(fill='x', pady=self._PAD_SECTION)
 
-        self.generation_mode_var = tk.StringVar(value='individual')  # Default: por linha
-        ttk.Radiobutton(mode_frame, text="Por Linha (um PDF por cliente)",
-                       variable=self.generation_mode_var, value='individual').pack(anchor='w')
-        ttk.Radiobutton(mode_frame, text="Agregado (todos num único PDF)",
-                       variable=self.generation_mode_var, value='aggregate').pack(anchor='w')
+        mode_left = ttk.Frame(mode_frame)
+        mode_left.pack(side='left', fill='x', expand=True)
+        self.generation_mode_var = tk.StringVar(value='individual')
+        ttk.Radiobutton(mode_left, text="Por Linha (um PDF por cliente)",
+                       variable=self.generation_mode_var, value='individual').pack(anchor='w', pady=1)
+        ttk.Radiobutton(mode_left, text="Agregado (todos num único PDF)",
+                       variable=self.generation_mode_var, value='aggregate').pack(anchor='w', pady=1)
 
-        # Filtro de clientes
-        filter_row = ttk.Frame(mode_frame)
-        filter_row.pack(fill='x', pady=(5, 0))
-        ttk.Button(filter_row, text="Filtrar Clientes...", command=self._open_client_filter).pack(side='left')
-        self.client_filter_label = ttk.Label(filter_row, text="Todos os clientes", foreground='gray')
-        self.client_filter_label.pack(side='left', padx=10)
-        self._client_filter = None  # None = todos, set() = filtrados
+        mode_right = ttk.Frame(mode_frame)
+        mode_right.pack(side='right')
+        ttk.Button(mode_right, text="Filtrar Clientes...", command=self._open_client_filter).pack(anchor='e')
+        self.client_filter_label = ttk.Label(mode_right, text="Todos os clientes",
+                                             foreground='#888888', style='Status.TLabel')
+        self.client_filter_label.pack(anchor='e', pady=(4, 0))
+        self._client_filter = None
 
-        # Botões
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(pady=20)
+        # --- Separador antes dos botões ---
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(12, 8))
 
-        preview_btn = ttk.Button(btn_frame, text="Pré-visualizar",
-                                command=self._preview_excel, style='TButton')
-        preview_btn.pack(side='left', padx=5)
+        # --- Ações ---
+        actions_frame = ttk.Frame(frame)
+        actions_frame.pack(fill='x', pady=(0, 4))
 
-        generate_btn = ttk.Button(btn_frame, text="Gerar PDF(s)",
-                                 command=self._generate, style='TButton')
-        generate_btn.pack(side='left', padx=5)
+        # Botão principal com destaque
+        generate_btn = ttk.Button(actions_frame, text="Gerar PDF(s)",
+                                 command=self._generate, style='Accent.TButton')
+        generate_btn.pack(side='left', padx=(0, 6))
 
-        export_excel_btn = ttk.Button(btn_frame, text="Exportar Excel",
-                                      command=self._export_excel, style='TButton')
-        export_excel_btn.pack(side='left', padx=5)
+        ttk.Button(actions_frame, text="Exportar Excel",
+                   command=self._export_excel).pack(side='left', padx=6)
 
-        ttk.Button(btn_frame, text="Guardar Configurações",
-                  command=self._save_config).pack(side='left', padx=5)
-
-        # Segunda linha de botões
-        btn_frame2 = ttk.Frame(frame)
-        btn_frame2.pack(pady=(0, 10))
-
-        ttk.Button(btn_frame2, text="Abrir Pasta de Destino",
-                  command=self._open_output_folder).pack(side='left', padx=5)
-        ttk.Button(btn_frame2, text="Resumo IRS",
-                  command=self._show_irs_summary).pack(side='left', padx=5)
-        self.email_btn = ttk.Button(btn_frame2, text="Enviar por Email",
+        self.email_btn = ttk.Button(actions_frame, text="Enviar Email",
                                     command=self._send_email, state='disabled')
-        self.email_btn.pack(side='left', padx=5)
+        self.email_btn.pack(side='left', padx=6)
 
-        # Barra de progresso
-        self.progress_var = tk.DoubleVar(value=0)
-        self.progress_bar = ttk.Progressbar(frame, variable=self.progress_var, maximum=100, mode='determinate')
-        self.progress_bar.pack(fill='x', pady=(5, 0))
+        # Menu "Mais..." para ações secundárias
+        self._more_menu = tk.Menu(self.root, tearoff=0)
+        self._more_menu.add_command(label="Pré-visualizar dados", command=self._preview_excel)
+        self._more_menu.add_command(label="Abrir pasta de destino", command=self._open_output_folder)
+        self._more_menu.add_separator()
+        self._more_menu.add_command(label="Resumo IRS", command=self._show_irs_summary)
+        self._more_menu.add_separator()
+        self._more_menu.add_command(label="Guardar configurações", command=self._save_config)
 
-        # Status
-        self.status_var = tk.StringVar(value="Pronto para converter  |  Ctrl+O: Abrir  Ctrl+G: Gerar  Ctrl+S: Guardar")
-        ttk.Label(frame, textvariable=self.status_var, foreground='gray').pack(pady=5)
+        def _show_more_menu():
+            btn = more_btn
+            self._more_menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+
+        more_btn = ttk.Button(actions_frame, text="Mais...", command=_show_more_menu)
+        more_btn.pack(side='right', padx=(6, 0))
     
     def _setup_pdf_tab(self):
         """Tab de configurações do PDF."""
-        frame = ttk.Frame(self.tab_pdf, padding=20)
+        frame = ttk.Frame(self.tab_pdf, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
-        
+
         # Tamanho da página
-        size_frame = ttk.LabelFrame(frame, text="Tamanho da Página", padding=10)
-        size_frame.pack(fill='x', pady=5)
-        
+        size_frame = ttk.LabelFrame(frame, text="Tamanho da Página", padding=self._PAD_INNER)
+        size_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.page_size_var = tk.StringVar(value=self.config['pdf']['page_size'])
-        ttk.Label(size_frame, text="Tamanho:").grid(row=0, column=0, sticky='w', padx=5)
-        ttk.Combobox(size_frame, textvariable=self.page_size_var, 
-                    values=['A4', 'A3', 'Letter'], width=15, state='readonly').grid(row=0, column=1, padx=5)
-        
+        ttk.Label(size_frame, text="Tamanho:").grid(row=0, column=0, sticky='e', padx=(0, 8), pady=4)
+        ttk.Combobox(size_frame, textvariable=self.page_size_var,
+                    values=['A4', 'A3', 'Letter'], width=15, state='readonly').grid(row=0, column=1, padx=(0, 20), pady=4)
+
         self.orientation_var = tk.StringVar(value=self.config['pdf']['orientation'])
-        ttk.Label(size_frame, text="Orientação:").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Combobox(size_frame, textvariable=self.orientation_var, 
-                    values=['portrait', 'landscape'], width=15, state='readonly').grid(row=0, column=3, padx=5)
-        
+        ttk.Label(size_frame, text="Orientação:").grid(row=0, column=2, sticky='e', padx=(0, 8), pady=4)
+        ttk.Combobox(size_frame, textvariable=self.orientation_var,
+                    values=['portrait', 'landscape'], width=15, state='readonly').grid(row=0, column=3, pady=4)
+
         # Margens
-        margin_frame = ttk.LabelFrame(frame, text="Margens (mm)", padding=10)
-        margin_frame.pack(fill='x', pady=5)
-        
+        margin_frame = ttk.LabelFrame(frame, text="Margens (mm)", padding=self._PAD_INNER)
+        margin_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.margin_top_var = tk.IntVar(value=self.config['pdf']['margin_top'])
         self.margin_bottom_var = tk.IntVar(value=self.config['pdf']['margin_bottom'])
         self.margin_left_var = tk.IntVar(value=self.config['pdf']['margin_left'])
         self.margin_right_var = tk.IntVar(value=self.config['pdf']['margin_right'])
-        
-        ttk.Label(margin_frame, text="Superior:").grid(row=0, column=0, sticky='w', padx=5)
-        ttk.Spinbox(margin_frame, textvariable=self.margin_top_var, from_=5, to=50, width=8).grid(row=0, column=1, padx=5)
-        
-        ttk.Label(margin_frame, text="Inferior:").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Spinbox(margin_frame, textvariable=self.margin_bottom_var, from_=5, to=50, width=8).grid(row=0, column=3, padx=5)
-        
-        ttk.Label(margin_frame, text="Esquerda:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        ttk.Spinbox(margin_frame, textvariable=self.margin_left_var, from_=5, to=50, width=8).grid(row=1, column=1, padx=5)
-        
-        ttk.Label(margin_frame, text="Direita:").grid(row=1, column=2, sticky='w', padx=5, pady=5)
-        ttk.Spinbox(margin_frame, textvariable=self.margin_right_var, from_=5, to=50, width=8).grid(row=1, column=3, padx=5)
-        
+
+        for i, (label, var) in enumerate([
+            ("Superior:", self.margin_top_var), ("Inferior:", self.margin_bottom_var),
+            ("Esquerda:", self.margin_left_var), ("Direita:", self.margin_right_var),
+        ]):
+            row, col = divmod(i, 2)
+            ttk.Label(margin_frame, text=label).grid(row=row, column=col*2, sticky='e', padx=(0, 8), pady=4)
+            ttk.Spinbox(margin_frame, textvariable=var, from_=5, to=50, width=8).grid(
+                row=row, column=col*2+1, padx=(0, 20), pady=4)
+
         # Botão Guardar
-        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
     
     def _setup_header_tab(self):
         """Tab de configurações do cabeçalho."""
-        frame = ttk.Frame(self.tab_header, padding=20)
+        frame = ttk.Frame(self.tab_header, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
-        
+
         # Mostrar cabeçalho
         self.show_header_var = tk.BooleanVar(value=self.config['header']['show_header'])
-        ttk.Checkbutton(frame, text="Mostrar cabeçalho no PDF", 
-                       variable=self.show_header_var).pack(anchor='w', pady=5)
-        
+        ttk.Checkbutton(frame, text="Mostrar cabeçalho no PDF",
+                       variable=self.show_header_var).pack(anchor='w', pady=(0, 8))
+
         # Dados da empresa
-        company_frame = ttk.LabelFrame(frame, text="Dados da Empresa (valores padrão)", padding=10)
-        company_frame.pack(fill='x', pady=10)
-        
+        company_frame = ttk.LabelFrame(frame, text="Dados da Empresa", padding=self._PAD_INNER)
+        company_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.company_name_var = tk.StringVar(value=self.config['header']['company_name'])
         self.company_address_var = tk.StringVar(value=self.config['header']['company_address'])
         self.company_phone_var = tk.StringVar(value=self.config['header']['company_phone'])
         self.company_email_var = tk.StringVar(value=self.config['header']['company_email'])
         self.company_nif_var = tk.StringVar(value=self.config['header']['company_nif'])
-        
+
         fields = [
             ("Nome:", self.company_name_var),
             ("Morada:", self.company_address_var),
@@ -326,225 +388,214 @@ class ConverterApp:
             ("Email:", self.company_email_var),
             ("NIF:", self.company_nif_var),
         ]
-        
+
         for i, (label, var) in enumerate(fields):
-            ttk.Label(company_frame, text=label).grid(row=i, column=0, sticky='w', padx=5, pady=2)
-            ttk.Entry(company_frame, textvariable=var, width=50).grid(row=i, column=1, sticky='ew', padx=5, pady=2)
-        
+            ttk.Label(company_frame, text=label).grid(row=i, column=0, sticky='e', padx=(0, 8), pady=4)
+            ttk.Entry(company_frame, textvariable=var).grid(row=i, column=1, sticky='ew', pady=4)
+
         company_frame.columnconfigure(1, weight=1)
-        
+
         # Logo
-        logo_frame = ttk.LabelFrame(frame, text="Logo (opcional)", padding=10)
-        logo_frame.pack(fill='x', pady=10)
-        
+        logo_frame = ttk.LabelFrame(frame, text="Logo (opcional)", padding=self._PAD_INNER)
+        logo_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.logo_path_var = tk.StringVar(value=self.config['header'].get('logo_path', ''))
-        ttk.Entry(logo_frame, textvariable=self.logo_path_var, width=50).pack(side='left', fill='x', expand=True)
-        ttk.Button(logo_frame, text="Procurar...", command=self._browse_logo).pack(side='right', padx=(10, 0))
-        
+        ttk.Entry(logo_frame, textvariable=self.logo_path_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(logo_frame, text="Procurar...", command=self._browse_logo).pack(side='right', padx=(8, 0))
+
         # Botão Guardar
-        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
     
     def _setup_table_tab(self):
-        """Tab de configurações da tabela."""
-        frame = ttk.Frame(self.tab_table, padding=20)
+        """Tab de configurações da tabela e rodapé."""
+        frame = ttk.Frame(self.tab_table, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
-        
+
         # Fontes
-        font_frame = ttk.LabelFrame(frame, text="Tamanho de Fonte", padding=10)
-        font_frame.pack(fill='x', pady=5)
-        
+        font_frame = ttk.LabelFrame(frame, text="Fontes e Espaçamento", padding=self._PAD_INNER)
+        font_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.font_size_var = tk.IntVar(value=self.config['table']['font_size'])
         self.header_font_size_var = tk.IntVar(value=self.config['table']['header_font_size'])
         self.row_padding_var = tk.IntVar(value=self.config['table']['row_padding'])
-        
-        ttk.Label(font_frame, text="Texto:").grid(row=0, column=0, sticky='w', padx=5)
-        ttk.Spinbox(font_frame, textvariable=self.font_size_var, from_=6, to=14, width=8).grid(row=0, column=1, padx=5)
-        
-        ttk.Label(font_frame, text="Cabeçalho:").grid(row=0, column=2, sticky='w', padx=5)
-        ttk.Spinbox(font_frame, textvariable=self.header_font_size_var, from_=8, to=16, width=8).grid(row=0, column=3, padx=5)
-        
-        ttk.Label(font_frame, text="Espaço:").grid(row=0, column=4, sticky='w', padx=5)
-        ttk.Spinbox(font_frame, textvariable=self.row_padding_var, from_=2, to=12, width=8).grid(row=0, column=5, padx=5)
-        
-        # Opções
-        options_frame = ttk.LabelFrame(frame, text="Opções da Tabela", padding=10)
-        options_frame.pack(fill='x', pady=5)
-        
+
+        for i, (label, var, rng) in enumerate([
+            ("Texto:", self.font_size_var, (6, 14)),
+            ("Cabeçalho:", self.header_font_size_var, (8, 16)),
+            ("Espaçamento:", self.row_padding_var, (2, 12)),
+        ]):
+            ttk.Label(font_frame, text=label).grid(row=0, column=i*2, sticky='e', padx=(0, 8), pady=4)
+            ttk.Spinbox(font_frame, textvariable=var, from_=rng[0], to=rng[1], width=6).grid(
+                row=0, column=i*2+1, padx=(0, 16), pady=4)
+
+        # Opções da tabela
+        options_frame = ttk.LabelFrame(frame, text="Opções da Tabela", padding=self._PAD_INNER)
+        options_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.show_grid_var = tk.BooleanVar(value=self.config['table']['show_grid'])
         self.alternate_rows_var = tk.BooleanVar(value=self.config['table']['alternate_rows'])
-        
-        ttk.Checkbutton(options_frame, text="Mostrar grelha/bordas", 
-                       variable=self.show_grid_var).pack(anchor='w')
-        ttk.Checkbutton(options_frame, text="Cores alternadas nas linhas", 
-                       variable=self.alternate_rows_var).pack(anchor='w')
-        
+
+        ttk.Checkbutton(options_frame, text="Mostrar grelha/bordas",
+                       variable=self.show_grid_var).pack(anchor='w', pady=2)
+        ttk.Checkbutton(options_frame, text="Cores alternadas nas linhas",
+                       variable=self.alternate_rows_var).pack(anchor='w', pady=2)
+
         # Rodapé
-        footer_frame = ttk.LabelFrame(frame, text="Rodapé", padding=10)
-        footer_frame.pack(fill='x', pady=5)
-        
+        footer_frame = ttk.LabelFrame(frame, text="Rodapé", padding=self._PAD_INNER)
+        footer_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.show_signatures_var = tk.BooleanVar(value=self.config['footer']['show_signatures'])
         self.show_date_var = tk.BooleanVar(value=self.config['footer']['show_date'])
         self.show_observations_var = tk.BooleanVar(value=self.config['footer']['show_observations'])
-        
-        ttk.Checkbutton(footer_frame, text="Mostrar área de assinaturas", 
-                       variable=self.show_signatures_var).pack(anchor='w')
-        ttk.Checkbutton(footer_frame, text="Mostrar data de geração", 
-                       variable=self.show_date_var).pack(anchor='w')
-        ttk.Checkbutton(footer_frame, text="Mostrar observações", 
-                       variable=self.show_observations_var).pack(anchor='w')
-        
-        ttk.Label(footer_frame, text="Texto personalizado no rodapé:").pack(anchor='w', pady=(10, 0))
+
+        ttk.Checkbutton(footer_frame, text="Mostrar área de assinaturas",
+                       variable=self.show_signatures_var).pack(anchor='w', pady=2)
+        ttk.Checkbutton(footer_frame, text="Mostrar data de geração",
+                       variable=self.show_date_var).pack(anchor='w', pady=2)
+        ttk.Checkbutton(footer_frame, text="Mostrar observações",
+                       variable=self.show_observations_var).pack(anchor='w', pady=2)
+
+        footer_text_frame = ttk.Frame(footer_frame)
+        footer_text_frame.pack(fill='x', pady=(8, 0))
+        ttk.Label(footer_text_frame, text="Texto personalizado:").pack(side='left', padx=(0, 8))
         self.custom_footer_var = tk.StringVar(value=self.config['footer'].get('custom_footer', ''))
-        ttk.Entry(footer_frame, textvariable=self.custom_footer_var, width=60).pack(fill='x', pady=5)
-        
+        ttk.Entry(footer_text_frame, textvariable=self.custom_footer_var).pack(side='left', fill='x', expand=True)
+
         # Botão Guardar
-        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
     
     def _setup_colors_tab(self):
         """Tab de configurações de cores."""
-        frame = ttk.Frame(self.tab_colors, padding=20)
+        frame = ttk.Frame(self.tab_colors, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
-        
+
+        colors_frame = ttk.LabelFrame(frame, text="Cores do PDF", padding=self._PAD_INNER)
+        colors_frame.pack(fill='x', pady=self._PAD_SECTION)
+        colors_frame.columnconfigure(1, weight=1)
+
         self.color_vars = {}
-        
+
         colors_config = [
-            ('header_bg', 'Fundo do cabeçalho da tabela'),
-            ('header_text', 'Texto do cabeçalho da tabela'),
-            ('row_alt', 'Cor alternada das linhas'),
-            ('border', 'Cor das bordas'),
-            ('title', 'Cor do título da empresa'),
+            ('header_bg', 'Fundo do cabeçalho'),
+            ('header_text', 'Texto do cabeçalho'),
+            ('row_alt', 'Linhas alternadas'),
+            ('border', 'Bordas'),
+            ('title', 'Título da empresa'),
         ]
-        
-        for key, label in colors_config:
-            row_frame = ttk.Frame(frame)
-            row_frame.pack(fill='x', pady=5)
-            
-            ttk.Label(row_frame, text=label, width=30).pack(side='left')
-            
+
+        for i, (key, label) in enumerate(colors_config):
             color_value = self.config['colors'].get(key, '#000000')
             var = tk.StringVar(value=color_value)
             self.color_vars[key] = var
-            
-            color_entry = ttk.Entry(row_frame, textvariable=var, width=15)
-            color_entry.pack(side='left', padx=5)
-            
-            color_btn = tk.Button(row_frame, text="  ", bg=color_value, width=3,
-                                 command=lambda k=key, v=var, b=None: self._pick_color(k, v))
-            color_btn.pack(side='left')
+
+            ttk.Label(colors_frame, text=label).grid(row=i, column=0, sticky='e', padx=(0, 12), pady=6)
+            ttk.Entry(colors_frame, textvariable=var, width=10).grid(row=i, column=1, sticky='w', pady=6)
+
+            color_btn = tk.Button(colors_frame, text="     ", bg=color_value, width=4,
+                                 relief='flat', borderwidth=1,
+                                 command=lambda k=key, v=var: self._pick_color(k, v))
+            color_btn.grid(row=i, column=2, padx=(8, 0), pady=6)
             self.color_vars[f'{key}_btn'] = color_btn
-        
+
         # Botão Guardar
-        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
     
     def _setup_contabilidade_tab(self):
         """Tab de configurações de contabilidade."""
-        frame = ttk.Frame(self.tab_contab, padding=20)
+        frame = ttk.Frame(self.tab_contab, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
-        
-        # Título
-        ttk.Label(frame, text="Configurações de Contabilidade", style='Header.TLabel').pack(pady=(0, 15))
-        
-        # Descrição
-        desc_text = "Configure quais colunas do Excel serão incluídas no PDF de contabilidade.\nSepare as colunas por vírgula, na ordem desejada."
-        ttk.Label(frame, text=desc_text, foreground='gray').pack(pady=(0, 10))
-        
+
+        ttk.Label(frame, text="Separe as colunas por vírgula, na ordem desejada.",
+                  foreground='#666666', style='Status.TLabel').pack(anchor='w', pady=(0, 8))
+
         # Colunas
-        colunas_frame = ttk.LabelFrame(frame, text="Colunas a Incluir", padding=10)
-        colunas_frame.pack(fill='x', pady=10)
-        
+        colunas_frame = ttk.LabelFrame(frame, text="Colunas a Incluir", padding=self._PAD_INNER)
+        colunas_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         contab_cfg = self.config.get('contabilidade', {})
         default_colunas = 'Nr., SIGLA, Cliente, CONTAB, Iva, Subtotal, Extras, Duodécimos, S.Social GER, S.Soc Emp, Ret. IRS, Ret. IRS EXT, SbTx/Fcomp, Outro, TOTAL'
-        
+
         self.contab_colunas_var = tk.StringVar(value=contab_cfg.get('colunas', default_colunas))
-        
-        ttk.Label(colunas_frame, text="Lista de colunas (separadas por vírgula):").pack(anchor='w', pady=(0, 5))
-        
-        # Text widget para permitir múltiplas linhas
-        self.contab_colunas_text = tk.Text(colunas_frame, height=4, width=70, wrap='word')
-        self.contab_colunas_text.pack(fill='x', pady=5)
+
+        self.contab_colunas_text = tk.Text(colunas_frame, height=3, wrap='word',
+                                           font=(self._FONT_FAMILY, self._FONT_SIZE))
+        self.contab_colunas_text.pack(fill='x', pady=(0, 8))
         self.contab_colunas_text.insert('1.0', self.contab_colunas_var.get())
-        
-        # Botão para restaurar padrão
+
         def reset_colunas():
             self.contab_colunas_text.delete('1.0', tk.END)
             self.contab_colunas_text.insert('1.0', default_colunas)
-        
-        ttk.Button(colunas_frame, text="Restaurar Padrão", command=reset_colunas).pack(anchor='e', pady=5)
-        
+
+        ttk.Button(colunas_frame, text="Restaurar Padrão", command=reset_colunas).pack(anchor='e')
+
         # Opções de destaque
-        options_frame = ttk.LabelFrame(frame, text="Opções de Formatação", padding=10)
-        options_frame.pack(fill='x', pady=10)
-        
+        options_frame = ttk.LabelFrame(frame, text="Formatação", padding=self._PAD_INNER)
+        options_frame.pack(fill='x', pady=self._PAD_SECTION)
+
         self.contab_destacar_total_var = tk.BooleanVar(value=contab_cfg.get('destacar_total', True))
-        ttk.Checkbutton(options_frame, text="Destacar coluna TOTAL com cor de fundo", 
-                       variable=self.contab_destacar_total_var).pack(anchor='w')
-        
+        ttk.Checkbutton(options_frame, text="Destacar coluna TOTAL com cor de fundo",
+                       variable=self.contab_destacar_total_var).pack(anchor='w', pady=2)
+
         self.contab_destacar_valores_var = tk.BooleanVar(value=contab_cfg.get('destacar_valores', True))
-        ttk.Checkbutton(options_frame, text="Destacar valores (positivos/negativos)", 
-                       variable=self.contab_destacar_valores_var).pack(anchor='w')
-        
-        # Exemplos de colunas possíveis
-        examples_frame = ttk.LabelFrame(frame, text="Colunas Disponíveis (exemplos)", padding=10)
-        examples_frame.pack(fill='x', pady=10)
-        
-        examples = [
-            "Nr. - Número do cliente",
-            "SIGLA - Sigla do cliente",
-            "Cliente - Nome do cliente",
-            "CONTAB - Valor de contabilidade",
-            "Iva - Valor do IVA",
-            "Subtotal - Subtotal",
-            "Extras - Valores extras",
-            "Duodécimos - Duodécimos",
-            "S.Social GER - Segurança Social (Gerente)",
-            "S.Soc Emp - Segurança Social (Empresa)",
-            "Ret. IRS - Retenção IRS",
-            "Ret. IRS EXT - Retenção IRS Exterior",
-            "SbTx/Fcomp - Subsídios/Férias",
-            "Outro - Outros valores",
-            "TOTAL - Total calculado",
+        ttk.Checkbutton(options_frame, text="Destacar valores (positivos/negativos)",
+                       variable=self.contab_destacar_valores_var).pack(anchor='w', pady=2)
+
+        # Referência de colunas (colapsável via expander)
+        ref_frame = ttk.LabelFrame(frame, text="Referência de Colunas", padding=self._PAD_INNER)
+        ref_frame.pack(fill='x', pady=self._PAD_SECTION)
+
+        ref_cols = [
+            ("Nr.", "Número"),        ("SIGLA", "Sigla"),
+            ("Cliente", "Nome"),      ("CONTAB", "Contabilidade"),
+            ("Iva", "IVA"),           ("Subtotal", "Subtotal"),
+            ("Extras", "Extras"),     ("Duodécimos", "Duodécimos"),
+            ("S.Social GER", "SS Gerente"), ("S.Soc Emp", "SS Empresa"),
+            ("Ret. IRS", "IRS"),      ("Ret. IRS EXT", "IRS Ext."),
+            ("SbTx/Fcomp", "Sub/Férias"), ("Outro", "Outros"),
+            ("TOTAL", "Total"),
         ]
-        
-        examples_text = "\n".join(examples)
-        ttk.Label(examples_frame, text=examples_text, foreground='gray', justify='left').pack(anchor='w')
-        
+
+        ref_grid = ttk.Frame(ref_frame)
+        ref_grid.pack(fill='x')
+        for i, (code, desc) in enumerate(ref_cols):
+            row, col = divmod(i, 3)
+            ttk.Label(ref_grid, text=f"{code} — {desc}", foreground='#666666',
+                      style='Status.TLabel').grid(row=row, column=col, sticky='w', padx=(0, 20), pady=1)
+
         # Botão Guardar
-        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
     
     def _setup_banking_tab(self):
         """Tab de configurações de dados bancários (múltiplas contas)."""
-        frame = ttk.Frame(self.tab_banking, padding=20)
+        frame = ttk.Frame(self.tab_banking, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
 
-        # Título
-        ttk.Label(frame, text="Dados Bancários", style='Header.TLabel').pack(pady=(0, 15))
-
-        desc_text = "Configure as contas bancárias que aparecerão no rodapé do PDF.\nA conta marcada como predefinida será usada na geração."
-        ttk.Label(frame, text=desc_text, foreground='gray').pack(pady=(0, 10))
+        ttk.Label(frame, text="A conta predefinida será usada na geração do PDF.",
+                  foreground='#666666', style='Status.TLabel').pack(anchor='w', pady=(0, 8))
 
         # Mostrar dados bancários
         banking_cfg = self.config.get('banking', {})
         self.show_banking_var = tk.BooleanVar(value=banking_cfg.get('show_banking', True))
         ttk.Checkbutton(frame, text="Mostrar dados bancários no PDF",
-                       variable=self.show_banking_var).pack(anchor='w', pady=5)
+                       variable=self.show_banking_var).pack(anchor='w', pady=(0, 4))
 
         # Título bancário
         title_row = ttk.Frame(frame)
-        title_row.pack(fill='x', pady=5)
-        ttk.Label(title_row, text="Título:").pack(side='left')
+        title_row.pack(fill='x', pady=(0, 8))
+        ttk.Label(title_row, text="Título:").pack(side='left', padx=(0, 8))
         self.banking_title_var = tk.StringVar(value=banking_cfg.get('title', 'Nossos Dados Bancários:'))
-        ttk.Entry(title_row, textvariable=self.banking_title_var, width=40).pack(side='left', padx=5)
+        ttk.Entry(title_row, textvariable=self.banking_title_var, width=40).pack(side='left')
 
         # Lista de contas
-        accounts_frame = ttk.LabelFrame(frame, text="Contas Bancárias", padding=10)
-        accounts_frame.pack(fill='both', expand=True, pady=10)
-
-        # Treeview para contas
-        tree_frame = ttk.Frame(accounts_frame)
-        tree_frame.pack(fill='both', expand=True)
+        accounts_frame = ttk.LabelFrame(frame, text="Contas Bancárias", padding=self._PAD_INNER)
+        accounts_frame.pack(fill='both', expand=True, pady=self._PAD_SECTION)
 
         cols = ('banco', 'iban', 'predefinida')
-        self.accounts_tree = ttk.Treeview(tree_frame, columns=cols, show='headings', height=5)
+        self.accounts_tree = ttk.Treeview(accounts_frame, columns=cols, show='headings', height=5)
         self.accounts_tree.heading('banco', text='Banco')
         self.accounts_tree.heading('iban', text='IBAN')
         self.accounts_tree.heading('predefinida', text='Predefinida')
@@ -553,7 +604,6 @@ class ConverterApp:
         self.accounts_tree.column('predefinida', width=80)
         self.accounts_tree.pack(fill='both', expand=True)
 
-        # Carregar contas existentes
         accounts = banking_cfg.get('accounts', [])
         for acc in accounts:
             default_mark = 'Sim' if acc.get('default', False) else ''
@@ -563,16 +613,16 @@ class ConverterApp:
                 default_mark,
             ))
 
-        # Botões de gestão de contas
         acc_btn_frame = ttk.Frame(accounts_frame)
-        acc_btn_frame.pack(fill='x', pady=(10, 0))
+        acc_btn_frame.pack(fill='x', pady=(8, 0))
 
-        ttk.Button(acc_btn_frame, text="Adicionar", command=self._add_bank_account).pack(side='left', padx=5)
-        ttk.Button(acc_btn_frame, text="Remover", command=self._remove_bank_account).pack(side='left', padx=5)
-        ttk.Button(acc_btn_frame, text="Definir como Predefinida", command=self._set_default_account).pack(side='left', padx=5)
+        ttk.Button(acc_btn_frame, text="Adicionar", command=self._add_bank_account).pack(side='left', padx=(0, 6))
+        ttk.Button(acc_btn_frame, text="Remover", command=self._remove_bank_account).pack(side='left', padx=6)
+        ttk.Button(acc_btn_frame, text="Definir como Predefinida", command=self._set_default_account).pack(side='left', padx=6)
 
         # Botão Guardar
-        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(pady=20)
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
     
     def _add_bank_account(self):
         """Adiciona uma nova conta bancária via popup."""
@@ -1321,28 +1371,29 @@ class ConverterApp:
     
     def _setup_profiles_tab(self):
         """Tab de gestão de perfis de configuração."""
-        frame = ttk.Frame(self.tab_profiles, padding=20)
+        frame = ttk.Frame(self.tab_profiles, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
 
-        ttk.Label(frame, text="Perfis de Configuração", style='Header.TLabel').pack(pady=(0, 10))
+        ttk.Label(frame, text="Perfis de Configuração", style='Header.TLabel').pack(anchor='w', pady=(0, 4))
         ttk.Label(frame, text="Guarde diferentes configurações como perfis reutilizáveis.",
-                 foreground='gray').pack(pady=(0, 10))
+                 foreground='#666666', style='Status.TLabel').pack(anchor='w', pady=(0, 10))
 
         # Lista de perfis
-        list_frame = ttk.LabelFrame(frame, text="Perfis Guardados", padding=10)
-        list_frame.pack(fill='both', expand=True, pady=5)
+        list_frame = ttk.LabelFrame(frame, text="Perfis Guardados", padding=self._PAD_INNER)
+        list_frame.pack(fill='both', expand=True, pady=self._PAD_SECTION)
 
-        self.profiles_listbox = tk.Listbox(list_frame, height=8, font=('Helvetica', 10))
+        self.profiles_listbox = tk.Listbox(list_frame, height=8,
+                                           font=(self._FONT_FAMILY, self._FONT_SIZE))
         self.profiles_listbox.pack(fill='both', expand=True)
 
         # Botões
         btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill='x', pady=10)
+        btn_frame.pack(fill='x', pady=(8, 0))
 
-        ttk.Button(btn_frame, text="Guardar Perfil Atual", command=self._save_profile).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Carregar Perfil", command=self._load_profile).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Apagar Perfil", command=self._delete_profile).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Atualizar Lista", command=self._refresh_profiles).pack(side='right', padx=5)
+        ttk.Button(btn_frame, text="Guardar Perfil Atual", command=self._save_profile).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text="Carregar Perfil", command=self._load_profile).pack(side='left', padx=6)
+        ttk.Button(btn_frame, text="Apagar Perfil", command=self._delete_profile).pack(side='left', padx=6)
+        ttk.Button(btn_frame, text="Atualizar", command=self._refresh_profiles).pack(side='right')
 
         self._refresh_profiles()
 
@@ -1543,10 +1594,10 @@ class ConverterApp:
 
     def _setup_history_tab(self):
         """Tab de histórico de conversões."""
-        frame = ttk.Frame(self.tab_history, padding=20)
+        frame = ttk.Frame(self.tab_history, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
 
-        ttk.Label(frame, text="Histórico de Conversões", style='Header.TLabel').pack(pady=(0, 10))
+        ttk.Label(frame, text="Histórico de Conversões", style='Header.TLabel').pack(anchor='w', pady=(0, 10))
 
         # Treeview
         tree_frame = ttk.Frame(frame)
@@ -1572,8 +1623,8 @@ class ConverterApp:
         self.history_tree.column('clientes', width=70, minwidth=50)
         self.history_tree.column('resultado', width=80, minwidth=60)
 
-        self.history_tree.tag_configure('success', foreground='#38A169')
-        self.history_tree.tag_configure('error', foreground='#E53E3E')
+        self.history_tree.tag_configure('success', foreground='#107C10')
+        self.history_tree.tag_configure('error', foreground='#D13438')
 
         self.history_tree.pack(fill='both', expand=True)
 
@@ -1581,10 +1632,10 @@ class ConverterApp:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill='x', pady=(10, 0))
 
-        ttk.Button(btn_frame, text="Atualizar", command=self._refresh_history).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Limpar Histórico", command=self._clear_history).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Exportar CSV", command=self._export_history_csv).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Exportar Excel", command=self._export_history_excel).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Atualizar", command=self._refresh_history).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text="Limpar Histórico", command=self._clear_history).pack(side='left', padx=6)
+        ttk.Button(btn_frame, text="Exportar CSV", command=self._export_history_csv).pack(side='right', padx=(6, 0))
+        ttk.Button(btn_frame, text="Exportar Excel", command=self._export_history_excel).pack(side='right', padx=6)
 
         self._refresh_history()
 
@@ -1629,49 +1680,51 @@ class ConverterApp:
 
     def _setup_batch_tab(self):
         """Tab de processamento em lote."""
-        frame = ttk.Frame(self.tab_batch, padding=20)
+        frame = ttk.Frame(self.tab_batch, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
 
-        ttk.Label(frame, text="Processamento Multificheiros", style='Header.TLabel').pack(pady=(0, 15))
+        ttk.Label(frame, text="Processamento Multificheiros", style='Header.TLabel').pack(anchor='w', pady=(0, 10))
 
         # Seleção de pasta
-        folder_frame = ttk.LabelFrame(frame, text="Pasta com ficheiros Excel", padding=10)
-        folder_frame.pack(fill='x', pady=5)
+        folder_frame = ttk.LabelFrame(frame, text="Pasta com ficheiros Excel", padding=self._PAD_INNER)
+        folder_frame.pack(fill='x', pady=self._PAD_SECTION)
 
         self.batch_folder_var = tk.StringVar()
-        ttk.Entry(folder_frame, textvariable=self.batch_folder_var, width=55).pack(side='left', fill='x', expand=True)
-        ttk.Button(folder_frame, text="Procurar...", command=self._browse_batch_folder).pack(side='right', padx=(10, 0))
+        ttk.Entry(folder_frame, textvariable=self.batch_folder_var).pack(side='left', fill='x', expand=True)
+        ttk.Button(folder_frame, text="Procurar...", command=self._browse_batch_folder).pack(side='right', padx=(8, 0))
 
         # Modo de geração
-        mode_frame = ttk.LabelFrame(frame, text="Modo de Geração", padding=10)
-        mode_frame.pack(fill='x', pady=5)
+        mode_frame = ttk.LabelFrame(frame, text="Modo de Geração", padding=self._PAD_INNER)
+        mode_frame.pack(fill='x', pady=self._PAD_SECTION)
 
         self.batch_mode_var = tk.StringVar(value='individual')
         ttk.Radiobutton(mode_frame, text="Por Linha (um PDF por cliente)",
-                        variable=self.batch_mode_var, value='individual').pack(anchor='w')
+                        variable=self.batch_mode_var, value='individual').pack(anchor='w', pady=1)
         ttk.Radiobutton(mode_frame, text="Agregado (um PDF por ficheiro Excel)",
-                        variable=self.batch_mode_var, value='aggregate').pack(anchor='w')
+                        variable=self.batch_mode_var, value='aggregate').pack(anchor='w', pady=1)
 
         # Lista de ficheiros encontrados
-        files_frame = ttk.LabelFrame(frame, text="Ficheiros encontrados", padding=10)
-        files_frame.pack(fill='both', expand=True, pady=5)
+        files_frame = ttk.LabelFrame(frame, text="Ficheiros encontrados", padding=self._PAD_INNER)
+        files_frame.pack(fill='both', expand=True, pady=self._PAD_SECTION)
 
         self.batch_files_var = tk.StringVar(value="Selecione uma pasta para ver os ficheiros.")
-        ttk.Label(files_frame, textvariable=self.batch_files_var, foreground='gray',
-                  justify='left').pack(anchor='w')
+        ttk.Label(files_frame, textvariable=self.batch_files_var, foreground='#666666',
+                  justify='left', style='Status.TLabel').pack(anchor='w')
 
         # Barra de progresso e status
         self.batch_progress_var = tk.DoubleVar(value=0)
         self.batch_progress_bar = ttk.Progressbar(frame, variable=self.batch_progress_var,
                                                    maximum=100, mode='determinate')
-        self.batch_progress_bar.pack(fill='x', pady=(10, 0))
+        self.batch_progress_bar.pack(fill='x', pady=(10, 2))
 
         self.batch_status_var = tk.StringVar(value="Pronto")
-        ttk.Label(frame, textvariable=self.batch_status_var, foreground='gray').pack(pady=3)
+        ttk.Label(frame, textvariable=self.batch_status_var, foreground='#666666',
+                  style='Status.TLabel').pack(pady=(0, 4))
 
         # Botão
-        self.batch_run_btn = ttk.Button(frame, text="Processar Todos", command=self._run_batch)
-        self.batch_run_btn.pack(pady=5)
+        self.batch_run_btn = ttk.Button(frame, text="Processar Todos",
+                                        command=self._run_batch, style='Accent.TButton')
+        self.batch_run_btn.pack(anchor='e')
 
     def _browse_batch_folder(self):
         """Seleciona pasta para processamento em lote."""
