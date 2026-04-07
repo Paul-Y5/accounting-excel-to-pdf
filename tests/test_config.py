@@ -12,12 +12,17 @@ from src.config import DEFAULT_CONFIG, load_config, save_config, get_config_path
 
 class TestDefaultConfig:
     """Testes para a configuração padrão."""
-    
+
     def test_default_config_has_required_sections(self):
         """Verifica que DEFAULT_CONFIG tem todas as secções necessárias."""
-        required_sections = ['pdf', 'header', 'colors', 'table', 'footer', 'output', 'contabilidade', 'banking']
+        required_sections = ['pdf', 'header', 'colors', 'table', 'footer', 'output', 'contabilidade', 'banking', 'ui']
         for section in required_sections:
             assert section in DEFAULT_CONFIG, f"Secção '{section}' em falta no DEFAULT_CONFIG"
+
+    def test_ui_section_has_theme_key(self):
+        """Verifica que a secção ui tem a chave theme com valor padrão light."""
+        assert 'theme' in DEFAULT_CONFIG['ui']
+        assert DEFAULT_CONFIG['ui']['theme'] == 'light'
     
     def test_pdf_section_has_required_keys(self):
         """Verifica que a secção PDF tem as chaves necessárias."""
@@ -87,8 +92,7 @@ class TestSaveConfig:
         """Verifica que guardar e carregar preserva os dados."""
         config_path = os.path.join(temp_dir, 'config.json')
         monkeypatch.setattr('src.config.get_config_path', lambda: config_path)
-        
-        # Modificar config e guardar
+
         config = copy.deepcopy(DEFAULT_CONFIG)
         config['banking']['accounts'][0]['bank_name'] = 'CGD'
         config['banking']['accounts'][0]['iban'] = 'PT50 0035 0000 0000 0000 0000 0'
@@ -98,6 +102,19 @@ class TestSaveConfig:
 
         assert loaded_config['banking']['accounts'][0]['bank_name'] == 'CGD'
         assert loaded_config['banking']['accounts'][0]['iban'] == 'PT50 0035 0000 0000 0000 0000 0'
+
+    def test_ui_theme_roundtrip(self, temp_dir, monkeypatch):
+        """Verifica que o tema da UI é preservado em save/load."""
+        config_path = os.path.join(temp_dir, 'config.json')
+        monkeypatch.setattr('src.config.get_config_path', lambda: config_path)
+
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config['ui']['theme'] = 'dark'
+
+        save_config(config)
+        loaded = load_config()
+
+        assert loaded['ui']['theme'] == 'dark'
 
 
 class TestDeepCopyPrevention:

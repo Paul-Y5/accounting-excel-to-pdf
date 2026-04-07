@@ -90,7 +90,10 @@ DEFAULT_CONFIG = {
     'recent': {
         'last_excel_dir': '',
         'last_output_dir': '',
-    }
+    },
+    'ui': {
+        'theme': 'light',
+    },
 }
 
 

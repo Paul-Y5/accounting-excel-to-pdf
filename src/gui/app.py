@@ -32,17 +32,18 @@ class ConverterApp:
 
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Conversor Excel → PDF")
+        self.root.title("Conversor Excel")
         self.root.geometry("780x640")
         self.root.minsize(700, 560)
         self.root.resizable(True, True)
 
-        # Tema moderno (Sun Valley)
+        # Tema moderno (Sun Valley) — aplicado antes de criar widgets
+        self._sv_ttk_available = False
         try:
             import sv_ttk
-            sv_ttk.set_theme('light')
+            self._sv_ttk_available = True
         except ImportError:
-            pass  # fallback ao tema do sistema
+            pass
 
         # Inicializar base de dados SQLite
         init_db()
@@ -50,6 +51,11 @@ class ConverterApp:
 
         # Carregar configurações
         self.config = load_config()
+
+        # Aplicar tema guardado
+        if self._sv_ttk_available:
+            import sv_ttk
+            sv_ttk.set_theme(self.config.get('ui', {}).get('theme', 'light'))
 
         # Últimos PDFs gerados (para envio por email)
         self._last_generated_files = []
@@ -118,9 +124,13 @@ class ConverterApp:
                   background=[('active', '#005a9e'), ('!active', '#0078D4')],
                   foreground=[('active', 'white'), ('!active', 'white')])
 
+        # Barra inferior (tema) — criada antes do notebook para ficar na base
+        self._setup_bottom_bar()
+
         # Notebook (tabs) — 5 tabs principais
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill='both', expand=True, padx=self._PAD_OUTER, pady=self._PAD_OUTER)
+        self.notebook.pack(fill='both', expand=True, padx=self._PAD_OUTER,
+                           pady=(self._PAD_OUTER, 0))
 
         # Tab 1: Conversão
         self.tab_convert = ttk.Frame(self.notebook)
@@ -147,6 +157,35 @@ class ConverterApp:
         self.notebook.add(self.tab_settings, text='Definições')
         self._setup_settings_tab()
     
+    def _setup_bottom_bar(self):
+        """Barra inferior com controlos globais da interface."""
+        bar = ttk.Frame(self.root, padding=(self._PAD_OUTER, 4))
+        bar.pack(side='bottom', fill='x')
+
+        ttk.Separator(self.root, orient='horizontal').pack(side='bottom', fill='x')
+
+        current_theme = self.config.get('ui', {}).get('theme', 'light')
+        self._theme_btn_text = tk.StringVar(
+            value='Tema: Escuro' if current_theme == 'light' else 'Tema: Claro'
+        )
+        ttk.Button(bar, textvariable=self._theme_btn_text,
+                   command=self._toggle_theme).pack(side='right')
+
+    def _toggle_theme(self):
+        """Alterna entre tema claro e escuro."""
+        if not self._sv_ttk_available:
+            messagebox.showinfo("Tema", "O pacote sv-ttk não está instalado.")
+            return
+
+        import sv_ttk
+        current = self.config.get('ui', {}).get('theme', 'light')
+        new_theme = 'dark' if current == 'light' else 'light'
+
+        sv_ttk.set_theme(new_theme)
+        self.config.setdefault('ui', {})['theme'] = new_theme
+        self._theme_btn_text.set('Tema: Escuro' if new_theme == 'light' else 'Tema: Claro')
+        save_config(self.config)
+
     def _setup_settings_tab(self):
         """Tab de definições com sub-notebook para todas as configurações."""
         settings_nb = ttk.Notebook(self.tab_settings)
@@ -908,6 +947,9 @@ class ConverterApp:
             },
             'banking': self._get_banking_from_ui(),
             'recent': self.config.get('recent', {'last_excel_dir': '', 'last_output_dir': ''}),
+            'ui': {
+                'theme': self.config.get('ui', {}).get('theme', 'light'),
+            },
         }
     
     def _get_banking_from_ui(self) -> dict:
@@ -1517,6 +1559,12 @@ class ConverterApp:
             default_mark = 'Sim' if acc.get('default', False) else ''
             self.accounts_tree.insert('', 'end', values=(
                 acc.get('bank_name', ''), acc.get('iban', ''), default_mark))
+        # Tema
+        theme = cfg.get('ui', {}).get('theme', 'light')
+        if self._sv_ttk_available:
+            import sv_ttk
+            sv_ttk.set_theme(theme)
+        self._theme_btn_text.set('Tema: Escuro' if theme == 'light' else 'Tema: Claro')
 
     def _show_irs_summary(self):
         """Mostra resumo de IRS com totais por coluna."""
