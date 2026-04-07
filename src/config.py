@@ -94,6 +94,7 @@ DEFAULT_CONFIG = {
     },
     'ui': {
         'theme': 'light',
+        'notifications_enabled': True,
     },
 }
 

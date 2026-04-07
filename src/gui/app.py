@@ -19,6 +19,7 @@ from src import history
 from src.database import init_db, migrate_from_json, update_client_cache, get_cached_clients
 from src.email_sender import open_email_client
 from src.batch_processor import find_excel_files, process_batch
+from src import notifier
 class ConverterApp:
     """Aplicação principal com interface gráfica para conversão de Excel para PDF."""
 
@@ -395,6 +396,15 @@ class ConverterApp:
             ttk.Label(margin_frame, text=label).grid(row=row, column=col*2, sticky='e', padx=(0, 8), pady=4)
             ttk.Spinbox(margin_frame, textvariable=var, from_=5, to=50, width=8).grid(
                 row=row, column=col*2+1, padx=(0, 20), pady=4)
+
+        # Interface
+        ui_frame = ttk.LabelFrame(frame, text="Interface", padding=self._PAD_INNER)
+        ui_frame.pack(fill='x', pady=self._PAD_SECTION)
+
+        self.notifications_enabled_var = tk.BooleanVar(
+            value=self.config.get('ui', {}).get('notifications_enabled', True))
+        ttk.Checkbutton(ui_frame, text="Ativar notificações desktop após conversão",
+                        variable=self.notifications_enabled_var).pack(anchor='w')
 
         # Nome do ficheiro de saída
         name_frame = ttk.LabelFrame(frame, text="Nome do Ficheiro de Saída", padding=self._PAD_INNER)
@@ -970,6 +980,8 @@ class ConverterApp:
             'recent': self.config.get('recent', {'last_excel_dir': '', 'last_output_dir': ''}),
             'ui': {
                 'theme': self.config.get('ui', {}).get('theme', 'light'),
+                'notifications_enabled': self.notifications_enabled_var.get()
+                    if hasattr(self, 'notifications_enabled_var') else True,
             },
         }
     
@@ -1053,6 +1065,11 @@ class ConverterApp:
                     f"PDF gerado: {os.path.basename(result_path)} ({clients_count} clientes)"))
 
                 history.add_entry(excel_path, result_path, 'aggregate', clients_count, True)
+                self.root.after(0, lambda n=clients_count: notifier.notify(
+                    "Conversão concluída",
+                    f"{n} cliente(s) — {os.path.basename(result_path)}",
+                    self.config,
+                ))
 
                 self._last_generated_files = [result_path]
                 self.root.after(0, lambda: self.email_btn.configure(state='normal'))
@@ -1115,6 +1132,11 @@ class ConverterApp:
                         f"{len(result_files)} PDFs gerados!"))
 
                     history.add_entry(excel_path, folder, 'individual', len(result_files), True)
+                    self.root.after(0, lambda n=len(result_files): notifier.notify(
+                        "Conversão concluída",
+                        f"{n} PDF(s) gerado(s)",
+                        self.config,
+                    ))
 
                     self._last_generated_files = list(result_files)
                     self.root.after(0, lambda: self.email_btn.configure(state='normal'))
@@ -1631,12 +1653,15 @@ class ConverterApp:
             default_mark = 'Sim' if acc.get('default', False) else ''
             self.accounts_tree.insert('', 'end', values=(
                 acc.get('bank_name', ''), acc.get('iban', ''), default_mark))
-        # Tema
+        # UI
         theme = cfg.get('ui', {}).get('theme', 'light')
         if self._sv_ttk_available:
             import sv_ttk
             sv_ttk.set_theme(theme)
         self._theme_btn_text.set('Tema: Escuro' if theme == 'light' else 'Tema: Claro')
+        if hasattr(self, 'notifications_enabled_var'):
+            self.notifications_enabled_var.set(
+                cfg.get('ui', {}).get('notifications_enabled', True))
 
     def _show_irs_summary(self):
         """Mostra resumo de IRS com totais por coluna."""
@@ -1897,6 +1922,11 @@ class ConverterApp:
                 self.root.after(0, lambda: self.batch_progress_var.set(100))
                 self.root.after(0, lambda: self.batch_status_var.set(
                     f"Concluído: {ok} com sucesso, {fail} com erro(s)"))
+                self.root.after(0, lambda o=ok, f=fail: notifier.notify(
+                    "Batch concluído",
+                    f"{o} ficheiro(s) com sucesso, {f} com erro(s)",
+                    self.config,
+                ))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Processamento concluído",
                     f"Processados {len(results)} ficheiro(s).\n"
