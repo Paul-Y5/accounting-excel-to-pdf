@@ -11,7 +11,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 
-from src.config import load_config, save_config, DEFAULT_CONFIG, list_profiles, save_profile, load_profile, delete_profile
+from src.config import load_config, save_config, export_config, import_config, DEFAULT_CONFIG, list_profiles, save_profile, load_profile, delete_profile
 from src.converter import ExcelToPDFConverter
 from src.nif_validator import validate_nif
 from src.excel_exporter import export_to_excel
@@ -1458,6 +1458,21 @@ class ConverterApp:
         ttk.Button(btn_frame, text="Apagar Perfil", command=self._delete_profile).pack(side='left', padx=6)
         ttk.Button(btn_frame, text="Atualizar", command=self._refresh_profiles).pack(side='right')
 
+        # Exportar / Importar configurações
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Label(frame, text="Exportar / Importar Configurações",
+                  style='Header.TLabel').pack(anchor='w', pady=(0, 4))
+        ttk.Label(frame,
+                  text="Partilhe ou faça cópia de segurança das configurações entre máquinas.",
+                  foreground='#666666', style='Status.TLabel').pack(anchor='w', pady=(0, 8))
+
+        io_frame = ttk.Frame(frame)
+        io_frame.pack(anchor='w')
+        ttk.Button(io_frame, text="Exportar Configurações...",
+                   command=self._export_config).pack(side='left', padx=(0, 6))
+        ttk.Button(io_frame, text="Importar Configurações...",
+                   command=self._import_config).pack(side='left')
+
         self._refresh_profiles()
 
     def _refresh_profiles(self):
@@ -1520,6 +1535,40 @@ class ConverterApp:
         if messagebox.askyesno("Confirmar", f"Apagar o perfil '{name}'?"):
             delete_profile(name)
             self._refresh_profiles()
+
+    def _export_config(self):
+        """Exporta a configuração atual para um ficheiro JSON."""
+        path = filedialog.asksaveasfilename(
+            title="Exportar Configurações",
+            defaultextension=".json",
+            filetypes=[("Ficheiro JSON", "*.json"), ("Todos os ficheiros", "*.*")],
+        )
+        if not path:
+            return
+        config = self._get_config_from_ui()
+        if export_config(config, path):
+            messagebox.showinfo("Sucesso", f"Configurações exportadas para:\n{path}")
+        else:
+            messagebox.showerror("Erro", "Não foi possível exportar as configurações.")
+
+    def _import_config(self):
+        """Importa configurações a partir de um ficheiro JSON."""
+        path = filedialog.askopenfilename(
+            title="Importar Configurações",
+            filetypes=[("Ficheiro JSON", "*.json"), ("Todos os ficheiros", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            imported = import_config(path)
+        except (FileNotFoundError, ValueError) as e:
+            messagebox.showerror("Erro", f"Não foi possível importar:\n{e}")
+            return
+
+        self.config = imported
+        save_config(self.config)
+        self._reload_config_to_ui()
+        messagebox.showinfo("Sucesso", "Configurações importadas e aplicadas.")
 
     def _reload_config_to_ui(self):
         """Recarrega os valores da config atual para todos os widgets da UI."""

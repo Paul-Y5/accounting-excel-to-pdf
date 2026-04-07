@@ -191,6 +191,61 @@ def delete_profile(name: str) -> bool:
     return delete_profile_db(name)
 
 
+def export_config(config: dict, path: str) -> bool:
+    """Exporta a configuração atual para um ficheiro JSON externo.
+
+    Args:
+        config: Dicionário de configuração a exportar.
+        path:   Caminho completo do ficheiro de destino.
+
+    Returns:
+        True se exportou com sucesso, False caso contrário.
+    """
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Erro ao exportar configurações: {e}")
+        return False
+
+
+def import_config(path: str) -> dict:
+    """Importa configurações de um ficheiro JSON externo.
+
+    Faz deep-merge com DEFAULT_CONFIG para garantir que todas as chaves
+    existem, mesmo que o ficheiro importado seja de uma versão anterior.
+
+    Args:
+        path: Caminho do ficheiro JSON a importar.
+
+    Returns:
+        Dicionário de configuração resultante do merge.
+
+    Raises:
+        FileNotFoundError: Se o ficheiro não existir.
+        ValueError: Se o ficheiro não for JSON válido.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Ficheiro não encontrado: {path}")
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            imported = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Ficheiro JSON inválido: {e}") from e
+
+    config = copy.deepcopy(DEFAULT_CONFIG)
+    for section, values in imported.items():
+        if section in config:
+            if isinstance(values, dict):
+                config[section].update(values)
+            else:
+                config[section] = values
+
+    return config
+
+
 def save_config(config: dict) -> bool:
     """Guarda configurações no ficheiro JSON.
     
