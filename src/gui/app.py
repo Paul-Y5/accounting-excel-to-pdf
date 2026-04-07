@@ -396,10 +396,29 @@ class ConverterApp:
             ttk.Spinbox(margin_frame, textvariable=var, from_=5, to=50, width=8).grid(
                 row=row, column=col*2+1, padx=(0, 20), pady=4)
 
+        # Nome do ficheiro de saída
+        name_frame = ttk.LabelFrame(frame, text="Nome do Ficheiro de Saída", padding=self._PAD_INNER)
+        name_frame.pack(fill='x', pady=self._PAD_SECTION)
+        name_frame.columnconfigure(1, weight=1)
+
+        self.filename_template_var = tk.StringVar(
+            value=self.config.get('output', {}).get('filename_template', ''))
+        ttk.Label(name_frame, text="Template:").grid(row=0, column=0, sticky='e', padx=(0, 8), pady=4)
+        ttk.Entry(name_frame, textvariable=self.filename_template_var).grid(
+            row=0, column=1, sticky='ew', pady=4)
+        ttk.Label(name_frame,
+                  text="Tokens: {empresa}  {mes}  {nr}  {data}  {sigla}  {cliente}",
+                  foreground='#666666', style='Status.TLabel').grid(
+            row=1, column=0, columnspan=2, sticky='w', pady=(0, 2))
+        ttk.Label(name_frame,
+                  text="Exemplo: {empresa}_{mes}   Deixe em branco para usar o nome do ficheiro Excel.",
+                  foreground='#666666', style='Status.TLabel').grid(
+            row=2, column=0, columnspan=2, sticky='w')
+
         # Botão Guardar
         ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
         ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
-    
+
     def _setup_header_tab(self):
         """Tab de configurações do cabeçalho."""
         frame = ttk.Frame(self.tab_header, padding=self._PAD_OUTER)
@@ -929,6 +948,8 @@ class ConverterApp:
                 'auto_open': self.auto_open_var.get(),
                 'add_timestamp': self.add_timestamp_var.get(),
                 'output_folder': '',
+                'filename_template': self.filename_template_var.get()
+                    if hasattr(self, 'filename_template_var') else '',
             },
             'contabilidade': {
                 'enabled': True,
@@ -1532,6 +1553,8 @@ class ConverterApp:
         # Output
         self.auto_open_var.set(cfg['output']['auto_open'])
         self.add_timestamp_var.set(cfg['output']['add_timestamp'])
+        if hasattr(self, 'filename_template_var'):
+            self.filename_template_var.set(cfg.get('output', {}).get('filename_template', ''))
         # Colors
         for key, var in self.color_vars.items():
             if not key.endswith('_btn') and key in cfg.get('colors', {}):

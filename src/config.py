@@ -60,6 +60,7 @@ DEFAULT_CONFIG = {
         'auto_open': True,
         'add_timestamp': False,
         'output_folder': '',
+        'filename_template': '',
     },
     'contabilidade': {
         'enabled': True,
