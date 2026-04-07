@@ -17,6 +17,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.enums import TA_CENTER
 
 from src.config import DEFAULT_CONFIG
+from src.filename_template import render_template, get_template_context
 
 
 def _get_active_bank(config: dict) -> dict:
@@ -90,9 +91,38 @@ class ExcelToPDFConverter:
             else:
                 self.output_pdf_path = os.path.join(output_folder, f"{base_name}.pdf")
         
+        self._output_pdf_path_override = output_pdf_path
         self.styles = getSampleStyleSheet()
         self._setup_custom_styles()
     
+    def _resolve_output_path(self, data: dict) -> None:
+        """Recalcula output_pdf_path usando o template de nome, se configurado.
+
+        Deve ser chamado após read_excel_data() para que os tokens do template
+        (empresa, mes, etc.) estejam disponíveis.
+        """
+        if self._output_pdf_path_override:
+            return  # path explícito fornecido pelo chamador — não alterar
+
+        template = self.config.get('output', {}).get('filename_template', '')
+        if not template:
+            return  # sem template — manter o path calculado no __init__
+
+        context = get_template_context(data, self.config)
+        name = render_template(template, context)
+        if not name:
+            return  # template resultou em string vazia — manter o original
+
+        output_folder = self.config['output'].get('output_folder', '')
+        if not output_folder:
+            output_folder = os.path.dirname(self.excel_path)
+
+        if self.config['output'].get('add_timestamp', False):
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            name = f"{name}_{timestamp}"
+
+        self.output_pdf_path = os.path.join(output_folder, f"{name}.pdf")
+
     def _setup_custom_styles(self):
         """Configura estilos personalizados."""
         colors_cfg = self.config['colors']
@@ -681,6 +711,7 @@ class ExcelToPDFConverter:
             client_filter: Conjunto de nomes de clientes a incluir (None = todos).
         """
         data = self.read_excel_data()
+        self._resolve_output_path(data)
 
         # Filtrar clientes se necessário
         if client_filter is not None:
