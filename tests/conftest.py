@@ -11,6 +11,16 @@ from src.config import DEFAULT_CONFIG
 
 
 @pytest.fixture
+def isolated_db(tmp_path, monkeypatch):
+    """Redireciona a base de dados SQLite para um ficheiro temporário por teste."""
+    db_path = str(tmp_path / 'test_conversor.db')
+    monkeypatch.setattr('src.database._get_db_path', lambda: db_path)
+    from src.database import init_db
+    init_db()
+    yield db_path
+
+
+@pytest.fixture
 def sample_config():
     """Retorna uma cópia do DEFAULT_CONFIG para testes."""
     return copy.deepcopy(DEFAULT_CONFIG)

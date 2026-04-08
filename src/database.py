@@ -132,6 +132,73 @@ def get_history(limit: int = 50) -> list:
         conn.close()
 
 
+def get_history_filtered(
+    limit: int = 100,
+    date_from: str = None,
+    date_to: str = None,
+    success_only: bool = None,
+    search_term: str = None,
+) -> list:
+    """Retorna entradas do histórico com filtros opcionais.
+
+    Args:
+        limit:       Número máximo de resultados.
+        date_from:   Data de início no formato ISO (YYYY-MM-DD), inclusivo.
+        date_to:     Data de fim no formato ISO (YYYY-MM-DD), inclusivo.
+        success_only: True = apenas sucesso, False = apenas erros, None = todos.
+        search_term: Texto a pesquisar no nome do ficheiro fonte (parcial).
+
+    Returns:
+        Lista de dicionários com os dados do histórico, mais recentes primeiro.
+    """
+    conditions = []
+    params = []
+
+    if date_from:
+        conditions.append("timestamp >= ?")
+        params.append(date_from)
+
+    if date_to:
+        # Incluir o dia completo adicionando o limite de final do dia
+        conditions.append("timestamp <= ?")
+        params.append(date_to + 'T23:59:59')
+
+    if success_only is True:
+        conditions.append("success = 1")
+    elif success_only is False:
+        conditions.append("success = 0")
+
+    if search_term:
+        conditions.append("source_file LIKE ?")
+        params.append(f"%{search_term}%")
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+
+    conn = _get_connection()
+    try:
+        cursor = conn.execute(
+            f"SELECT * FROM history {where} ORDER BY id DESC LIMIT ?",
+            params,
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                'timestamp': row['timestamp'],
+                'source_file': row['source_file'],
+                'source_path': row['source_path'],
+                'output_path': row['output_path'],
+                'mode': row['mode'],
+                'clients_count': row['clients_count'],
+                'success': bool(row['success']),
+                'error': row['error'],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
 def clear_history():
     """Limpa todo o histórico."""
     conn = _get_connection()
