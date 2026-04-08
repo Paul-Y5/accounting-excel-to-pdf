@@ -7,6 +7,7 @@ Utiliza base de dados SQLite para persistência.
 """
 
 from src.database import (add_history_entry, get_history as _get_history,
+                          get_history_filtered as _get_history_filtered,
                           clear_history as _clear_history,
                           export_history_csv as _export_csv,
                           export_history_excel as _export_excel)
@@ -37,6 +38,28 @@ def get_history(limit: int = 50) -> list:
         Lista de entradas do histórico (mais recentes primeiro).
     """
     return _get_history(limit)
+
+
+def get_history_filtered(
+    limit: int = 100,
+    date_from: str = None,
+    date_to: str = None,
+    success_only: bool = None,
+    search_term: str = None,
+) -> list:
+    """Retorna entradas do histórico com filtros opcionais.
+
+    Args:
+        limit:        Número máximo de resultados.
+        date_from:    Data de início ISO (YYYY-MM-DD), inclusivo.
+        date_to:      Data de fim ISO (YYYY-MM-DD), inclusivo.
+        success_only: True = sucesso, False = erros, None = todos.
+        search_term:  Pesquisa parcial no nome do ficheiro.
+
+    Returns:
+        Lista de entradas (mais recentes primeiro).
+    """
+    return _get_history_filtered(limit, date_from, date_to, success_only, search_term)
 
 
 def clear_history():

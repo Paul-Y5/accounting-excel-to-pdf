@@ -1742,7 +1742,39 @@ class ConverterApp:
         frame = ttk.Frame(self.tab_history, padding=self._PAD_OUTER)
         frame.pack(fill='both', expand=True)
 
-        ttk.Label(frame, text="Histórico de Conversões", style='Header.TLabel').pack(anchor='w', pady=(0, 10))
+        ttk.Label(frame, text="Histórico de Conversões", style='Header.TLabel').pack(anchor='w', pady=(0, 6))
+
+        # --- Barra de filtros ---
+        filter_frame = ttk.LabelFrame(frame, text="Filtros", padding=(self._PAD_INNER, 4))
+        filter_frame.pack(fill='x', pady=(0, 8))
+
+        # Linha 1: pesquisa e resultado
+        row1 = ttk.Frame(filter_frame)
+        row1.pack(fill='x', pady=(0, 4))
+
+        ttk.Label(row1, text="Pesquisa:").pack(side='left', padx=(0, 4))
+        self.history_search_var = tk.StringVar()
+        ttk.Entry(row1, textvariable=self.history_search_var, width=24).pack(side='left', padx=(0, 12))
+
+        ttk.Label(row1, text="Resultado:").pack(side='left', padx=(0, 4))
+        self.history_result_var = tk.StringVar(value='Todos')
+        ttk.Combobox(row1, textvariable=self.history_result_var,
+                     values=['Todos', 'Sucesso', 'Erro'], state='readonly', width=10).pack(side='left', padx=(0, 12))
+
+        ttk.Button(row1, text="Filtrar", command=self._refresh_history).pack(side='left', padx=(0, 6))
+        ttk.Button(row1, text="Limpar Filtros", command=self._clear_history_filters).pack(side='left')
+
+        # Linha 2: datas
+        row2 = ttk.Frame(filter_frame)
+        row2.pack(fill='x')
+
+        ttk.Label(row2, text="De (YYYY-MM-DD):").pack(side='left', padx=(0, 4))
+        self.history_date_from_var = tk.StringVar()
+        ttk.Entry(row2, textvariable=self.history_date_from_var, width=12).pack(side='left', padx=(0, 12))
+
+        ttk.Label(row2, text="Até (YYYY-MM-DD):").pack(side='left', padx=(0, 4))
+        self.history_date_to_var = tk.StringVar()
+        ttk.Entry(row2, textvariable=self.history_date_to_var, width=12).pack(side='left')
 
         # Treeview
         tree_frame = ttk.Frame(frame)
@@ -1784,12 +1816,38 @@ class ConverterApp:
 
         self._refresh_history()
 
+    def _clear_history_filters(self):
+        """Limpa todos os filtros de histórico e recarrega."""
+        self.history_search_var.set('')
+        self.history_result_var.set('Todos')
+        self.history_date_from_var.set('')
+        self.history_date_to_var.set('')
+        self._refresh_history()
+
     def _refresh_history(self):
-        """Atualiza a lista de histórico."""
+        """Atualiza a lista de histórico aplicando os filtros ativos."""
         for item in self.history_tree.get_children():
             self.history_tree.delete(item)
 
-        entries = history.get_history(limit=100)
+        search = self.history_search_var.get().strip() if hasattr(self, 'history_search_var') else ''
+        result_filter = self.history_result_var.get() if hasattr(self, 'history_result_var') else 'Todos'
+        date_from = self.history_date_from_var.get().strip() if hasattr(self, 'history_date_from_var') else ''
+        date_to = self.history_date_to_var.get().strip() if hasattr(self, 'history_date_to_var') else ''
+
+        success_only = None
+        if result_filter == 'Sucesso':
+            success_only = True
+        elif result_filter == 'Erro':
+            success_only = False
+
+        entries = history.get_history_filtered(
+            limit=200,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            success_only=success_only,
+            search_term=search or None,
+        )
+
         for entry in entries:
             try:
                 dt = entry['timestamp'][:16].replace('T', ' ')
