@@ -68,6 +68,7 @@ DEFAULT_CONFIG = {
         'colunas': 'Nr., SIGLA, Cliente, CONTAB, Iva, Subtotal, Extras, Duodécimos, S.Social GER, S.Soc Emp, Ret. IRS, Ret. IRS EXT, SbTx/Fcomp, Outro, TOTAL',
         'destacar_total': True,
         'destacar_valores': True,
+        'col_widths': {},
     },
     'security': {
         'pdf_password': '',

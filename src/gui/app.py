@@ -613,6 +613,29 @@ class ConverterApp:
         ttk.Checkbutton(options_frame, text="Destacar valores (positivos/negativos)",
                        variable=self.contab_destacar_valores_var).pack(anchor='w', pady=2)
 
+        # Larguras de colunas configuráveis
+        widths_frame = ttk.LabelFrame(frame, text="Larguras das Colunas (mm, 0 = automático)", padding=self._PAD_INNER)
+        widths_frame.pack(fill='x', pady=self._PAD_SECTION)
+
+        col_widths_cfg = contab_cfg.get('col_widths', {})
+        all_cols = [
+            'Nr.', 'SIGLA', 'Cliente', 'CONTAB', 'Iva', 'Subtotal',
+            'Extras', 'Duodécimos', 'S.Social GER', 'S.Soc Emp',
+            'Ret. IRS', 'Ret. IRS EXT', 'SbTx/Fcomp', 'Outro', 'TOTAL',
+        ]
+        self.contab_col_widths_vars = {}
+        grid = ttk.Frame(widths_frame)
+        grid.pack(fill='x')
+        for i, col in enumerate(all_cols):
+            row, gcol = divmod(i, 3)
+            val = str(col_widths_cfg.get(col, 0))
+            var = tk.StringVar(value=val)
+            self.contab_col_widths_vars[col] = var
+            cell = ttk.Frame(grid)
+            cell.grid(row=row, column=gcol, sticky='w', padx=(0, 12), pady=2)
+            ttk.Label(cell, text=f"{col}:", width=14, anchor='w').pack(side='left')
+            ttk.Spinbox(cell, from_=0, to=200, textvariable=var, width=5).pack(side='left')
+
         # Referência de colunas (colapsável via expander)
         ref_frame = ttk.LabelFrame(frame, text="Referência de Colunas", padding=self._PAD_INNER)
         ref_frame.pack(fill='x', pady=self._PAD_SECTION)
@@ -923,6 +946,16 @@ class ConverterApp:
         """Obtém configurações da UI."""
         # Obter texto das colunas de contabilidade
         contab_colunas = self.contab_colunas_text.get('1.0', tk.END).strip() if hasattr(self, 'contab_colunas_text') else ''
+        # Obter larguras de colunas configuradas (ignorar zeros)
+        contab_col_widths = {}
+        if hasattr(self, 'contab_col_widths_vars'):
+            for col, var in self.contab_col_widths_vars.items():
+                try:
+                    v = float(var.get())
+                    if v > 0:
+                        contab_col_widths[col] = v
+                except (ValueError, TypeError):
+                    pass
         
         return {
             'pdf': {
@@ -969,6 +1002,7 @@ class ConverterApp:
                 'colunas': contab_colunas,
                 'destacar_total': self.contab_destacar_total_var.get() if hasattr(self, 'contab_destacar_total_var') else True,
                 'destacar_valores': self.contab_destacar_valores_var.get() if hasattr(self, 'contab_destacar_valores_var') else True,
+                'col_widths': contab_col_widths,
             },
             'security': {
                 'pdf_password': self.pdf_password_var.get() if hasattr(self, 'pdf_password_var') else '',
@@ -1643,6 +1677,10 @@ class ConverterApp:
             self.contab_destacar_total_var.set(contab_cfg.get('destacar_total', True))
         if hasattr(self, 'contab_destacar_valores_var'):
             self.contab_destacar_valores_var.set(contab_cfg.get('destacar_valores', True))
+        if hasattr(self, 'contab_col_widths_vars'):
+            col_widths_cfg = contab_cfg.get('col_widths', {})
+            for col, var in self.contab_col_widths_vars.items():
+                var.set(str(col_widths_cfg.get(col, 0)))
         # Security
         self.pdf_password_var.set(cfg.get('security', {}).get('pdf_password', ''))
         self.watermark_enabled_var.set(cfg.get('watermark', {}).get('enabled', False))
