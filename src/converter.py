@@ -560,11 +560,21 @@ class ExcelToPDFConverter:
                     # Colunas numéricas
                     col_widths.append(13 * mm)
             
+            # Aplicar larguras configuradas manualmente (em mm)
+            custom_widths = self.config.get('contabilidade', {}).get('col_widths', {})
+            if custom_widths:
+                for i, h in enumerate(headers):
+                    if h in custom_widths:
+                        try:
+                            col_widths[i] = float(custom_widths[h]) * mm
+                        except (ValueError, TypeError):
+                            pass
+
             # Ajustar para caber na largura disponível
             total = sum(col_widths)
             if total > available_width:
                 col_widths = [w * (available_width / total) for w in col_widths]
-            
+
             # Título da tabela
             mes_ref = data.get('mes_referencia', '')
             titulo_tabela = f"<b>MAPA DE CONTABILIDADE - {mes_ref}</b>" if mes_ref else "<b>MAPA DE CONTABILIDADE</b>"
