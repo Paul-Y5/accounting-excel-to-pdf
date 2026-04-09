@@ -447,6 +447,7 @@ class ConverterApp:
         self.company_address_var = tk.StringVar(value=self.config['header']['company_address'])
         self.company_phone_var = tk.StringVar(value=self.config['header']['company_phone'])
         self.company_email_var = tk.StringVar(value=self.config['header']['company_email'])
+        self.company_website_var = tk.StringVar(value=self.config['header'].get('company_website', ''))
         self.company_nif_var = tk.StringVar(value=self.config['header']['company_nif'])
 
         fields = [
@@ -454,6 +455,7 @@ class ConverterApp:
             ("Morada:", self.company_address_var),
             ("Telefone:", self.company_phone_var),
             ("Email:", self.company_email_var),
+            ("Website:", self.company_website_var),
             ("NIF:", self.company_nif_var),
         ]
 
@@ -937,6 +939,7 @@ class ConverterApp:
                 'company_address': self.company_address_var.get(),
                 'company_phone': self.company_phone_var.get(),
                 'company_email': self.company_email_var.get(),
+                'company_website': self.company_website_var.get(),
                 'company_nif': self.company_nif_var.get(),
                 'logo_path': self.logo_path_var.get(),
             },
@@ -1608,6 +1611,7 @@ class ConverterApp:
         self.company_address_var.set(cfg['header']['company_address'])
         self.company_phone_var.set(cfg['header']['company_phone'])
         self.company_email_var.set(cfg['header']['company_email'])
+        self.company_website_var.set(cfg['header'].get('company_website', ''))
         self.company_nif_var.set(cfg['header']['company_nif'])
         self.logo_path_var.set(cfg['header'].get('logo_path', ''))
         # Table

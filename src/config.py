@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
         'company_address': 'Rua Exemplo, 123 - 4000-000 Porto',
         'company_phone': '+351 220 000 000',
         'company_email': 'geral@empresa.pt',
+        'company_website': '',
         'company_nif': 'PT 500 000 000',
         'logo_path': '',
     },
