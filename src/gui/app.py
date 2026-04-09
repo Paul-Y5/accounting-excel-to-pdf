@@ -222,6 +222,16 @@ class ConverterApp:
         settings_nb.add(self.tab_banking, text='Dados Bancários')
         self._setup_banking_tab()
 
+        # Sub-tab: QR Code
+        self.tab_qrcode = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_qrcode, text='QR Code')
+        self._setup_qrcode_tab()
+
+        # Sub-tab: Fontes
+        self.tab_fonts = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_fonts, text='Fontes')
+        self._setup_fonts_tab()
+
     def _setup_convert_tab(self):
         """Tab de conversão com scroll."""
         # Canvas com scrollbar para conteúdo que não cabe na janela
@@ -347,6 +357,7 @@ class ConverterApp:
         # Menu "Mais..." para ações secundárias
         self._more_menu = tk.Menu(self.root, tearoff=0)
         self._more_menu.add_command(label="Pré-visualizar dados", command=self._preview_excel)
+        self._more_menu.add_command(label="Pré-visualizar PDF", command=self._preview_pdf)
         self._more_menu.add_command(label="Abrir pasta de destino", command=self._open_output_folder)
         self._more_menu.add_separator()
         self._more_menu.add_command(label="Resumo IRS", command=self._show_irs_summary)
@@ -772,6 +783,106 @@ class ConverterApp:
         vals[2] = 'Sim'
         self.accounts_tree.item(selected[0], values=vals)
 
+    def _setup_qrcode_tab(self):
+        """Tab de configurações de QR Code."""
+        frame = ttk.Frame(self.tab_qrcode, padding=self._PAD_OUTER)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text="Adiciona um QR Code ao final do PDF com o NIF ou IBAN da empresa.",
+                  foreground='#666666', style='Status.TLabel').pack(anchor='w', pady=(0, 8))
+
+        qr_cfg = self.config.get('qrcode', {})
+
+        self.qr_enabled_var = tk.BooleanVar(value=qr_cfg.get('enabled', False))
+        ttk.Checkbutton(frame, text="Incluir QR Code no PDF",
+                        variable=self.qr_enabled_var).pack(anchor='w', pady=2)
+
+        opts_frame = ttk.LabelFrame(frame, text="Opções do QR Code", padding=self._PAD_INNER)
+        opts_frame.pack(fill='x', pady=self._PAD_SECTION)
+
+        content_row = ttk.Frame(opts_frame)
+        content_row.pack(fill='x', pady=2)
+        ttk.Label(content_row, text="Conteúdo:").pack(side='left', padx=(0, 8))
+        self.qr_content_var = tk.StringVar(value=qr_cfg.get('content', 'nif'))
+        ttk.Combobox(content_row, textvariable=self.qr_content_var, width=12,
+                     values=['nif', 'iban'], state='readonly').pack(side='left')
+
+        size_row = ttk.Frame(opts_frame)
+        size_row.pack(fill='x', pady=2)
+        ttk.Label(size_row, text="Tamanho (mm):").pack(side='left', padx=(0, 8))
+        self.qr_size_var = tk.IntVar(value=qr_cfg.get('size_mm', 25))
+        ttk.Spinbox(size_row, from_=10, to=80, textvariable=self.qr_size_var, width=5).pack(side='left')
+
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
+
+    def _setup_fonts_tab(self):
+        """Tab de configurações de fontes personalizadas."""
+        frame = ttk.Frame(self.tab_fonts, padding=self._PAD_OUTER)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text="Permite usar fontes .ttf personalizadas no PDF.",
+                  foreground='#666666', style='Status.TLabel').pack(anchor='w', pady=(0, 8))
+
+        fonts_cfg = self.config.get('fonts', {})
+
+        # Fonte de corpo
+        body_row = ttk.Frame(frame)
+        body_row.pack(fill='x', pady=4)
+        ttk.Label(body_row, text="Fonte de Corpo:").pack(side='left', padx=(0, 8))
+        self.body_font_var = tk.StringVar(value=fonts_cfg.get('body_font', 'Helvetica'))
+        ttk.Entry(body_row, textvariable=self.body_font_var, width=25).pack(side='left')
+
+        # Fonte de cabeçalho
+        header_row = ttk.Frame(frame)
+        header_row.pack(fill='x', pady=4)
+        ttk.Label(header_row, text="Fonte de Cabeçalho:").pack(side='left', padx=(0, 8))
+        self.header_font_var = tk.StringVar(value=fonts_cfg.get('header_font', 'Helvetica-Bold'))
+        ttk.Entry(header_row, textvariable=self.header_font_var, width=25).pack(side='left')
+
+        # Fontes registadas
+        reg_frame = ttk.LabelFrame(frame, text="Fontes Registadas (.ttf)", padding=self._PAD_INNER)
+        reg_frame.pack(fill='both', expand=True, pady=self._PAD_SECTION)
+
+        cols = ('nome', 'caminho')
+        self.fonts_tree = ttk.Treeview(reg_frame, columns=cols, show='headings', height=4)
+        self.fonts_tree.heading('nome', text='Nome')
+        self.fonts_tree.heading('caminho', text='Caminho')
+        self.fonts_tree.column('nome', width=120)
+        self.fonts_tree.column('caminho', width=350)
+        self.fonts_tree.pack(fill='both', expand=True)
+
+        for entry in fonts_cfg.get('registered', []):
+            self.fonts_tree.insert('', 'end', values=(entry.get('name', ''), entry.get('path', '')))
+
+        btn_frame = ttk.Frame(reg_frame)
+        btn_frame.pack(fill='x', pady=(8, 0))
+        ttk.Button(btn_frame, text="Adicionar .ttf", command=self._add_font).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text="Remover", command=self._remove_font).pack(side='left', padx=6)
+
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=(16, 8))
+        ttk.Button(frame, text="Guardar Configurações", command=self._save_config).pack(anchor='e')
+
+    def _add_font(self):
+        """Adiciona uma fonte .ttf via diálogo de ficheiro."""
+        path = filedialog.askopenfilename(
+            title="Selecionar fonte .ttf",
+            filetypes=[("TrueType Font", "*.ttf"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        name = os.path.splitext(os.path.basename(path))[0]
+        self.fonts_tree.insert('', 'end', values=(name, path))
+
+    def _remove_font(self):
+        """Remove a fonte selecionada."""
+        selected = self.fonts_tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione uma fonte para remover.")
+            return
+        for item in selected:
+            self.fonts_tree.delete(item)
+
     def _open_client_filter(self):
         """Abre janela para selecionar clientes a incluir no PDF."""
         excel_path = self.excel_path.get()
@@ -885,6 +996,73 @@ class ConverterApp:
             subprocess.Popen(['open', folder])
         else:
             os.startfile(folder)
+
+    def _preview_pdf(self):
+        """Abre janela de pré-visualização do último PDF gerado."""
+        if not self._last_generated_files:
+            messagebox.showinfo("Info", "Gere um PDF primeiro para pré-visualizar.")
+            return
+
+        pdf_path = self._last_generated_files[0]
+        if not os.path.isfile(pdf_path):
+            messagebox.showerror("Erro", f"Ficheiro não encontrado:\n{pdf_path}")
+            return
+
+        try:
+            from src.pdf_preview import render_page
+        except ImportError:
+            messagebox.showerror("Erro", "PyMuPDF não instalado.\npip install PyMuPDF")
+            return
+
+        preview = tk.Toplevel(self.root)
+        preview.title(f"Pré-visualização — {os.path.basename(pdf_path)}")
+        preview.geometry("700x900")
+        preview.transient(self.root)
+
+        current_page = [0]
+
+        # Toolbar
+        toolbar = ttk.Frame(preview, padding=5)
+        toolbar.pack(fill='x')
+
+        page_label = ttk.Label(toolbar, text="")
+        page_label.pack(side='left', padx=8)
+
+        def show_page(idx):
+            try:
+                img, total = render_page(pdf_path, idx)
+            except Exception as e:
+                messagebox.showerror("Erro", str(e), parent=preview)
+                return
+            current_page[0] = idx
+            page_label.config(text=f"Página {idx + 1} / {total}")
+            prev_btn.config(state='normal' if idx > 0 else 'disabled')
+            next_btn.config(state='normal' if idx < total - 1 else 'disabled')
+
+            # Redimensionar para caber na janela
+            max_w = preview.winfo_width() - 30 or 670
+            max_h = preview.winfo_height() - 80 or 820
+            ratio = min(max_w / img.width, max_h / img.height, 1.0)
+            if ratio < 1.0:
+                new_size = (int(img.width * ratio), int(img.height * ratio))
+                img = img.resize(new_size)
+
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(img)
+            canvas.delete('all')
+            canvas.create_image(0, 0, anchor='nw', image=photo)
+            canvas._photo = photo  # manter referência
+            canvas.config(scrollregion=(0, 0, img.width, img.height))
+
+        prev_btn = ttk.Button(toolbar, text="< Anterior", command=lambda: show_page(current_page[0] - 1))
+        prev_btn.pack(side='left', padx=4)
+        next_btn = ttk.Button(toolbar, text="Seguinte >", command=lambda: show_page(current_page[0] + 1))
+        next_btn.pack(side='left', padx=4)
+
+        canvas = tk.Canvas(preview, bg='#e0e0e0')
+        canvas.pack(fill='both', expand=True)
+
+        show_page(0)
 
     def _pick_color(self, key, var):
         """Abre seletor de cor."""
@@ -1013,6 +1191,12 @@ class ConverterApp:
                 'text': self.watermark_text_var.get() if hasattr(self, 'watermark_text_var') else 'RASCUNHO',
                 'opacity': 0.1,
             },
+            'qrcode': {
+                'enabled': self.qr_enabled_var.get() if hasattr(self, 'qr_enabled_var') else False,
+                'content': self.qr_content_var.get() if hasattr(self, 'qr_content_var') else 'nif',
+                'size_mm': self.qr_size_var.get() if hasattr(self, 'qr_size_var') else 25,
+            },
+            'fonts': self._get_fonts_from_ui(),
             'banking': self._get_banking_from_ui(),
             'recent': self.config.get('recent', {'last_excel_dir': '', 'last_output_dir': ''}),
             'ui': {
@@ -1039,6 +1223,19 @@ class ConverterApp:
             'show_banking': self.show_banking_var.get() if hasattr(self, 'show_banking_var') else True,
             'title': self.banking_title_var.get() if hasattr(self, 'banking_title_var') else 'Nossos Dados Bancários:',
             'accounts': accounts,
+        }
+
+    def _get_fonts_from_ui(self) -> dict:
+        """Lê a configuração de fontes da UI."""
+        registered = []
+        if hasattr(self, 'fonts_tree'):
+            for item in self.fonts_tree.get_children():
+                vals = self.fonts_tree.item(item, 'values')
+                registered.append({'name': vals[0], 'path': vals[1]})
+        return {
+            'body_font': self.body_font_var.get() if hasattr(self, 'body_font_var') else 'Helvetica',
+            'header_font': self.header_font_var.get() if hasattr(self, 'header_font_var') else 'Helvetica-Bold',
+            'registered': registered,
         }
 
     def _save_config(self):
@@ -1704,6 +1901,22 @@ class ConverterApp:
         if hasattr(self, 'notifications_enabled_var'):
             self.notifications_enabled_var.set(
                 cfg.get('ui', {}).get('notifications_enabled', True))
+        # QR Code
+        if hasattr(self, 'qr_enabled_var'):
+            qr_cfg = cfg.get('qrcode', {})
+            self.qr_enabled_var.set(qr_cfg.get('enabled', False))
+            self.qr_content_var.set(qr_cfg.get('content', 'nif'))
+            self.qr_size_var.set(qr_cfg.get('size_mm', 25))
+        # Fonts
+        if hasattr(self, 'body_font_var'):
+            fonts_cfg = cfg.get('fonts', {})
+            self.body_font_var.set(fonts_cfg.get('body_font', 'Helvetica'))
+            self.header_font_var.set(fonts_cfg.get('header_font', 'Helvetica-Bold'))
+        if hasattr(self, 'fonts_tree'):
+            for item in self.fonts_tree.get_children():
+                self.fonts_tree.delete(item)
+            for entry in cfg.get('fonts', {}).get('registered', []):
+                self.fonts_tree.insert('', 'end', values=(entry.get('name', ''), entry.get('path', '')))
 
     def _show_irs_summary(self):
         """Mostra resumo de IRS com totais por coluna."""

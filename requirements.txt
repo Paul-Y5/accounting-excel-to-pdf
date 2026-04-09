@@ -5,6 +5,10 @@ Pillow==10.1.0
 PyPDF2>=3.0.0
 sv-ttk>=2.6
 
+# v3.3 — QR Code e pré-visualização
+qrcode[pil]>=7.4
+PyMuPDF>=1.23.0
+
 # Dependências para testes
 pytest>=7.0.0
 pytest-cov>=4.0.0

@@ -18,6 +18,7 @@ from reportlab.lib.enums import TA_CENTER
 
 from src.config import DEFAULT_CONFIG
 from src.filename_template import render_template, get_template_context
+from src.font_manager import load_fonts_from_config, get_body_font, get_header_font
 
 
 def _sanitize_text(value: str) -> str:
@@ -104,6 +105,10 @@ class ExcelToPDFConverter:
                 self.output_pdf_path = os.path.join(output_folder, f"{base_name}.pdf")
         
         self._output_pdf_path_override = output_pdf_path
+        # Registar fontes personalizadas (.ttf) antes de criar estilos
+        load_fonts_from_config(self.config)
+        self._body_font = get_body_font(self.config)
+        self._header_font = get_header_font(self.config)
         self.styles = getSampleStyleSheet()
         self._setup_custom_styles()
     
@@ -138,44 +143,51 @@ class ExcelToPDFConverter:
     def _setup_custom_styles(self):
         """Configura estilos personalizados."""
         colors_cfg = self.config['colors']
-        
+        body = self._body_font
+        header = self._header_font
+
         self.styles.add(ParagraphStyle(
             name='CompanyTitle',
             parent=self.styles['Heading1'],
+            fontName=header,
             fontSize=18,
             textColor=colors.HexColor(colors_cfg['title']),
             alignment=TA_CENTER,
             spaceAfter=6
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='SubTitle',
             parent=self.styles['Normal'],
+            fontName=body,
             fontSize=10,
             textColor=colors.HexColor('#4a5568'),
             alignment=TA_CENTER,
             spaceAfter=12
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
             parent=self.styles['Heading2'],
+            fontName=header,
             fontSize=12,
             textColor=colors.HexColor('#2d3748'),
             spaceBefore=12,
             spaceAfter=6,
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='NormalText',
             parent=self.styles['Normal'],
+            fontName=body,
             fontSize=self.config['table']['font_size'],
             leading=12
         ))
-        
+
         self.styles.add(ParagraphStyle(
             name='Footer',
             parent=self.styles['Normal'],
+            fontName=body,
             fontSize=8,
             textColor=colors.HexColor('#718096'),
             alignment=TA_CENTER
@@ -824,6 +836,21 @@ class ExcelToPDFConverter:
             elements.extend(self.create_items_table(data))
             elements.extend(self.create_footer(data))
 
+        # QR Code
+        qr_temp_path = None
+        qr_cfg = self.config.get('qrcode', {})
+        if qr_cfg.get('enabled', False):
+            try:
+                from src.qr_generator import build_qr_image, get_qr_data
+                qr_data = get_qr_data(self.config)
+                if qr_data:
+                    size = qr_cfg.get('size_mm', 25)
+                    qr_temp_path = build_qr_image(qr_data, size)
+                    elements.append(Spacer(1, 3*mm))
+                    elements.append(Image(qr_temp_path, width=size*mm, height=size*mm))
+            except Exception:
+                pass  # QR é opcional — não bloquear a geração
+
         # Marca d'água
         watermark_cfg = self.config.get('watermark', {})
         if watermark_cfg.get('enabled', False):
@@ -836,6 +863,13 @@ class ExcelToPDFConverter:
             doc.build(elements, onFirstPage=on_page, onLaterPages=on_page)
         else:
             doc.build(elements)
+
+        # Limpar ficheiro temporário do QR Code
+        if qr_temp_path and os.path.exists(qr_temp_path):
+            try:
+                os.remove(qr_temp_path)
+            except OSError:
+                pass
 
         # Encriptação com password
         security_cfg = self.config.get('security', {})
