@@ -20,6 +20,18 @@ from src.config import DEFAULT_CONFIG
 from src.filename_template import render_template, get_template_context
 
 
+def _sanitize_text(value: str) -> str:
+    """Escapa caracteres reservados de XML/HTML em texto simples.
+
+    Campos como nome da empresa, morada ou NIF não devem conter markup.
+    Escapar '<', '>' e '&' impede que conteúdo inesperado quebre o parser
+    de ReportLab ou injete tags indesejadas no documento.
+    """
+    if not value:
+        return value
+    return value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 def _get_active_bank(config: dict) -> dict:
     """Retorna a conta bancária ativa da configuração."""
     banking = config.get('banking', {})
@@ -196,7 +208,7 @@ class ExcelToPDFConverter:
                     campo = str(row[0]).strip().lower()
                     valor = str(row[1]).strip() if row[1] else ''
                     
-                    if campo in ['nome_empresa', 'morada_empresa', 'telefone_empresa', 'email_empresa', 'nif_empresa']:
+                    if campo in ['nome_empresa', 'morada_empresa', 'telefone_empresa', 'email_empresa', 'website_empresa', 'nif_empresa']:
                         data['empresa'][campo.replace('_empresa', '')] = valor
                     elif campo in ['nome_cliente', 'morada_cliente', 'telefone_cliente', 'nif_cliente']:
                         data['cliente'][campo.replace('_cliente', '')] = valor
@@ -396,15 +408,16 @@ class ExcelToPDFConverter:
                 pass
         
         # Título da empresa
-        nome = empresa.get('nome', 'EMPRESA')
+        nome = _sanitize_text(empresa.get('nome', 'EMPRESA'))
         elements.append(Paragraph(nome, self.styles['CompanyTitle']))
-        
+
         # Informações de contacto
-        morada = empresa.get('morada', '')
-        telefone = empresa.get('telefone', '')
-        email = empresa.get('email', '')
-        nif = empresa.get('nif', '')
-        
+        morada = _sanitize_text(empresa.get('morada', ''))
+        telefone = _sanitize_text(empresa.get('telefone', ''))
+        email = empresa.get('email', '')          # preservado para o link mailto:
+        website = empresa.get('website', '') or self.config['header'].get('company_website', '')
+        nif = _sanitize_text(empresa.get('nif', ''))
+
         info_parts = []
         if morada:
             info_parts.append(morada)
@@ -412,10 +425,15 @@ class ExcelToPDFConverter:
         if telefone:
             contact_line.append(f"Tel: {telefone}")
         if email:
-            contact_line.append(f"Email: {email}")
+            email_link = f'<a href="mailto:{email}" color="#2b6cb0">{email}</a>'
+            contact_line.append(f"Email: {email_link}")
+        if website:
+            url = website if website.startswith(('http://', 'https://')) else f'https://{website}'
+            website_link = f'<a href="{url}" color="#2b6cb0">{website}</a>'
+            contact_line.append(website_link)
         if nif:
             contact_line.append(f"NIF: {nif}")
-        
+
         if info_parts or contact_line:
             info_text = "<br/>".join(info_parts + [" | ".join(contact_line)])
             elements.append(Paragraph(info_text, self.styles['SubTitle']))
@@ -748,17 +766,22 @@ class ExcelToPDFConverter:
                 'right': pdf_cfg['margin_right']
             }
         
+        empresa_nome_meta = data.get('empresa', {}).get('nome') or self.config['header'].get('company_name', '')
         doc = SimpleDocTemplate(
             self.output_pdf_path,
             pagesize=page_size,
             rightMargin=margins['right']*mm,
             leftMargin=margins['left']*mm,
             topMargin=margins['top']*mm,
-            bottomMargin=margins['bottom']*mm
+            bottomMargin=margins['bottom']*mm,
+            title=data.get('documento', {}).get('numero', '') or os.path.basename(self.output_pdf_path),
+            author=empresa_nome_meta,
+            subject=data.get('tipo_relatorio', 'Documento'),
+            creator='Conversor Excel PDF',
         )
-        
+
         elements = []
-        
+
         if is_contabilidade:
             # Layout simplificado para contabilidade
             elements.extend(self.create_header(data))
@@ -885,18 +908,24 @@ class ExcelToPDFConverter:
         from reportlab.lib.pagesizes import A4
         
         # Configurar página
+        empresa_nome_meta = data.get('empresa', {}).get('nome') or self.config['header'].get('company_name', '')
+        cliente_nome = item.get('Cliente', '')
         doc = SimpleDocTemplate(
             pdf_path,
             pagesize=A4,
             rightMargin=20*mm,
             leftMargin=20*mm,
             topMargin=15*mm,
-            bottomMargin=15*mm
+            bottomMargin=15*mm,
+            title=f"{mes_ref} - {cliente_nome}".strip(' -'),
+            author=empresa_nome_meta,
+            subject='Documento Individual',
+            creator='Conversor Excel PDF',
         )
-        
+
         elements = []
         colors_cfg = self.config['colors']
-        
+
         # === CABEÇALHO DA EMPRESA ===
         elements.extend(self.create_header(data))
         
@@ -1000,9 +1029,10 @@ class ExcelToPDFConverter:
         # Callback para rodapé no fundo da página
         empresa = data.get('empresa', {})
         header_cfg = self.config['header']
-        empresa_nome = empresa.get('nome') or header_cfg.get('company_name', '')
-        empresa_tel = empresa.get('telefone') or header_cfg.get('company_phone', '')
+        empresa_nome = _sanitize_text(empresa.get('nome') or header_cfg.get('company_name', ''))
+        empresa_tel = _sanitize_text(empresa.get('telefone') or header_cfg.get('company_phone', ''))
         empresa_email = empresa.get('email') or header_cfg.get('company_email', '')
+        empresa_website = empresa.get('website') or header_cfg.get('company_website', '')
         
         watermark_cfg = self.config.get('watermark', {})
         wm_enabled = watermark_cfg.get('enabled', False)
@@ -1022,10 +1052,37 @@ class ExcelToPDFConverter:
                 empresa_info += f" | Tel: {empresa_tel}"
             if empresa_email:
                 empresa_info += f" | {empresa_email}"
+            if empresa_website:
+                empresa_info += f" | {empresa_website}"
 
             canvas.setFont('Helvetica', 7)
             canvas.setFillColor(colors.HexColor('#718096'))
-            canvas.drawCentredString(doc.pagesize[0] / 2, 15*mm, empresa_info)
+            x_center = doc.pagesize[0] / 2
+            canvas.drawCentredString(x_center, 15*mm, empresa_info)
+
+            # Hyperlink no email (rodapé canvas)
+            if empresa_email and empresa_email in empresa_info:
+                text_width = canvas.stringWidth(empresa_info, 'Helvetica', 7)
+                email_label = empresa_email
+                email_width = canvas.stringWidth(email_label, 'Helvetica', 7)
+                email_start = empresa_info.find(empresa_email)
+                prefix_width = canvas.stringWidth(empresa_info[:email_start], 'Helvetica', 7)
+                link_x = x_center - text_width / 2 + prefix_width
+                canvas.linkURL(f"mailto:{empresa_email}",
+                               (link_x, 14*mm, link_x + email_width, 16*mm),
+                               relative=0)
+
+            # Hyperlink no website (rodapé canvas)
+            if empresa_website and empresa_website in empresa_info:
+                text_width = canvas.stringWidth(empresa_info, 'Helvetica', 7)
+                web_width = canvas.stringWidth(empresa_website, 'Helvetica', 7)
+                web_start = empresa_info.find(empresa_website)
+                prefix_width = canvas.stringWidth(empresa_info[:web_start], 'Helvetica', 7)
+                link_x = x_center - text_width / 2 + prefix_width
+                web_url = empresa_website if empresa_website.startswith(('http://', 'https://')) else f'https://{empresa_website}'
+                canvas.linkURL(web_url,
+                               (link_x, 14*mm, link_x + web_width, 16*mm),
+                               relative=0)
 
             # Linha 2: Data de geração
             footer_text = f"Documento gerado a {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
