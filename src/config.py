@@ -70,6 +70,16 @@ DEFAULT_CONFIG = {
         'destacar_valores': True,
         'col_widths': {},
     },
+    'qrcode': {
+        'enabled': False,
+        'content': 'nif',
+        'size_mm': 25,
+    },
+    'fonts': {
+        'body_font': 'Helvetica',
+        'header_font': 'Helvetica-Bold',
+        'registered': [],
+    },
     'security': {
         'pdf_password': '',
         'pdf_owner_password': '',
