@@ -9,6 +9,9 @@ sv-ttk>=2.6
 qrcode[pil]>=7.4
 PyMuPDF>=1.23.0
 
+# v3.4 — Automação (watch folder, scheduler, CLI, hooks)
+# watchdog é opcional — o watch folder usa polling nativo se não estiver instalado
+
 # Dependências para testes
 pytest>=7.0.0
 pytest-cov>=4.0.0

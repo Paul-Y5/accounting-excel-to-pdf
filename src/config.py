@@ -100,6 +100,14 @@ DEFAULT_CONFIG = {
             }
         ],
     },
+    'automation': {
+        'watch_folder': '',
+        'watch_enabled': False,
+        'watch_mode': 'individual',
+        'watch_interval': 5,
+        'schedules': [],
+        'hooks': [],
+    },
     'recent': {
         'last_excel_dir': '',
         'last_output_dir': '',
