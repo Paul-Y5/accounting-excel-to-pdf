@@ -97,13 +97,13 @@ class ConverterApp:
         """Processa ficheiro largado via drag & drop."""
         # tkdnd pode envolver o path em {} se tiver espaços
         path = event_data.strip().strip('{}')
-        if path.lower().endswith(('.xlsx', '.xls')):
+        if path.lower().endswith(('.xlsx', '.xls', '.xlsm')):
             self.excel_path.set(path)
             self.config.setdefault('recent', {})['last_excel_dir'] = os.path.dirname(path)
             save_config(self.config)
             self.status_var.set(f"Ficheiro carregado: {os.path.basename(path)}")
         else:
-            messagebox.showwarning("Aviso", "Apenas ficheiros Excel (.xlsx, .xls) são suportados.")
+            messagebox.showwarning("Aviso", "Apenas ficheiros Excel (.xlsx, .xls, .xlsm) são suportados.")
         return event_data
 
     def _setup_ui(self):
@@ -431,7 +431,7 @@ class ConverterApp:
         ttk.Entry(src_row, textvariable=source_var, width=30).pack(side='left')
         def _browse():
             p = filedialog.askdirectory(title="Pasta de origem") or \
-                filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")])
+                filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls *.xlsm")])
             if p:
                 source_var.set(p)
         ttk.Button(src_row, text="...", command=_browse, width=3).pack(side='left', padx=(4, 0))
@@ -1408,7 +1408,7 @@ class ConverterApp:
         path = filedialog.askopenfilename(
             title="Selecionar ficheiro Excel",
             initialdir=initial_dir,
-            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+            filetypes=[("Excel files", "*.xlsx *.xls *.xlsm"), ("All files", "*.*")]
         )
         if path:
             self.excel_path.set(path)

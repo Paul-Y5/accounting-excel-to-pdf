@@ -11,7 +11,7 @@ from src.converter import ExcelToPDFConverter
 
 
 def find_excel_files(folder_path: str) -> list:
-    """Retorna lista de ficheiros Excel (.xlsx/.xls) numa pasta.
+    """Retorna lista de ficheiros Excel (.xlsx/.xls/.xlsm) numa pasta.
 
     Ignora ficheiros temporários do Excel (prefixo ~$).
     Retorna lista ordenada pelo nome do ficheiro.
@@ -32,7 +32,7 @@ def find_excel_files(folder_path: str) -> list:
     for name in sorted(os.listdir(folder_path)):
         if name.startswith('~$'):
             continue
-        if name.lower().endswith(('.xlsx', '.xls')):
+        if name.lower().endswith(('.xlsx', '.xls', '.xlsm')):
             files.append(os.path.join(folder_path, name))
     return files
 

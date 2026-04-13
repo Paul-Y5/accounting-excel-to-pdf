@@ -14,7 +14,7 @@ class WatchFolder:
     """Monitoriza uma pasta e converte automaticamente novos ficheiros Excel.
 
     Utiliza polling simples (sem dependência watchdog) para máxima compatibilidade.
-    A cada intervalo verifica se há novos ficheiros .xlsx/.xls que não estejam
+    A cada intervalo verifica se há novos ficheiros .xlsx/.xls/.xlsm que não estejam
     já em processamento.
 
     Args:
@@ -76,7 +76,7 @@ class WatchFolder:
         for name in os.listdir(self.folder_path):
             if name.startswith('~$'):
                 continue
-            if name.lower().endswith(('.xlsx', '.xls')):
+            if name.lower().endswith(('.xlsx', '.xls', '.xlsm')):
                 files.append(os.path.join(self.folder_path, name))
         return files
 
