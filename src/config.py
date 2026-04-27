@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
         'margin_bottom': 15,
         'margin_left': 15,
         'margin_right': 15,
+        'show_iva_summary': True,
     },
     'header': {
         'show_header': True,

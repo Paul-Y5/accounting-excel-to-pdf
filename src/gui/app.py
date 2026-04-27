@@ -865,6 +865,11 @@ class ConverterApp:
         self.show_date_var = tk.BooleanVar(value=self.config['footer']['show_date'])
         self.show_observations_var = tk.BooleanVar(value=self.config['footer']['show_observations'])
 
+        self.show_iva_summary_var = tk.BooleanVar(
+            value=self.config.get('pdf', {}).get('show_iva_summary', True))
+        ttk.Checkbutton(footer_frame, text="Mostrar resumo de IVA",
+                       variable=self.show_iva_summary_var).pack(anchor='w', pady=2)
+
         ttk.Checkbutton(footer_frame, text="Mostrar área de assinaturas",
                        variable=self.show_signatures_var).pack(anchor='w', pady=2)
         ttk.Checkbutton(footer_frame, text="Mostrar data de geração",
@@ -1642,6 +1647,8 @@ class ConverterApp:
                 'margin_bottom': self.margin_bottom_var.get(),
                 'margin_left': self.margin_left_var.get(),
                 'margin_right': self.margin_right_var.get(),
+                'show_iva_summary': self.show_iva_summary_var.get()
+                    if hasattr(self, 'show_iva_summary_var') else True,
             },
             'header': {
                 'show_header': self.show_header_var.get(),
@@ -2362,6 +2369,9 @@ class ConverterApp:
         self.row_padding_var.set(cfg['table']['row_padding'])
         self.show_grid_var.set(cfg['table']['show_grid'])
         self.alternate_rows_var.set(cfg['table']['alternate_rows'])
+        # PDF extras
+        if hasattr(self, 'show_iva_summary_var'):
+            self.show_iva_summary_var.set(cfg.get('pdf', {}).get('show_iva_summary', True))
         # Footer
         self.show_signatures_var.set(cfg['footer']['show_signatures'])
         self.show_date_var.set(cfg['footer']['show_date'])
