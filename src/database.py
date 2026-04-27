@@ -62,6 +62,14 @@ def init_db():
                 conversion_count INTEGER NOT NULL DEFAULT 1
             );
 
+            CREATE TABLE IF NOT EXISTS doc_sequences (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                serie         TEXT    NOT NULL UNIQUE,
+                ano           INTEGER NOT NULL,
+                ultimo_numero INTEGER NOT NULL DEFAULT 0,
+                reset_anual   INTEGER NOT NULL DEFAULT 1
+            );
+
             CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp);
             CREATE INDEX IF NOT EXISTS idx_client_cache_source ON client_cache(source_file);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_client_cache_unique
