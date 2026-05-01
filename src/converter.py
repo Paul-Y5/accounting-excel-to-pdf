@@ -33,6 +33,60 @@ def _sanitize_text(value: str) -> str:
     return value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
+_TAXAS_IVA_PT = (0, 6, 13, 23)  # Taxas legais em Portugal (%)
+
+
+def _compute_iva_summary(itens: list) -> list:
+    """Calcula o resumo de IVA agrupado por taxa.
+
+    Para cada item usa os campos ``Subtotal`` (base tributável) e ``Iva``
+    (montante de IVA). A taxa é inferida a partir do quociente Iva/Subtotal,
+    arredondada para a taxa legal mais próxima.
+
+    Args:
+        itens: Lista de dicts com dados dos itens.
+
+    Returns:
+        Lista ordenada por taxa de dicts com:
+        ``taxa`` (int %), ``base`` (float), ``iva`` (float), ``total`` (float).
+        Apenas linhas com base > 0 são incluídas.
+    """
+    from collections import defaultdict
+
+    grupos: dict[int, dict] = defaultdict(lambda: {'base': 0.0, 'iva': 0.0})
+
+    for item in itens:
+        base = item.get('Subtotal', 0) or 0
+        iva_val = item.get('Iva', 0) or 0
+
+        try:
+            base = float(base)
+            iva_val = float(iva_val)
+        except (TypeError, ValueError):
+            continue
+
+        if base == 0:
+            continue
+
+        # Inferir taxa (arredondar para a taxa legal mais próxima)
+        taxa_raw = (iva_val / base) * 100 if base != 0 else 0
+        taxa = min(_TAXAS_IVA_PT, key=lambda t: abs(t - taxa_raw))
+
+        grupos[taxa]['base'] += base
+        grupos[taxa]['iva'] += iva_val
+
+    return [
+        {
+            'taxa': taxa,
+            'base': round(dados['base'], 2),
+            'iva': round(dados['iva'], 2),
+            'total': round(dados['base'] + dados['iva'], 2),
+        }
+        for taxa, dados in sorted(grupos.items())
+        if dados['base'] > 0
+    ]
+
+
 def _get_active_bank(config: dict) -> dict:
     """Retorna a conta bancária ativa da configuração."""
     banking = config.get('banking', {})
@@ -744,6 +798,84 @@ class ExcelToPDFConverter:
         
         return elements
 
+    def create_iva_summary(self, data: dict) -> list:
+        """Cria a tabela de resumo de IVA.
+
+        Mostra base tributável, montante de IVA e total por taxa.
+        Retorna lista vazia se não houver dados de IVA ou se a opção
+        ``show_iva_summary`` estiver desactivada na configuração.
+        """
+        if not self.config.get('pdf', {}).get('show_iva_summary', True):
+            return []
+
+        itens = data.get('itens', [])
+        linhas = _compute_iva_summary(itens)
+        if not linhas:
+            return []
+
+        colors_cfg = self.config['colors']
+        elements = []
+        elements.append(Spacer(1, 6*mm))
+        elements.append(Paragraph('<b>RESUMO DE IVA</b>', self.styles['SectionHeader']))
+        elements.append(Spacer(1, 3*mm))
+
+        # Cabeçalho + linhas por taxa + totais
+        header = ['Taxa IVA', 'Base Tributável', 'Valor IVA', 'Total']
+        table_data = [header]
+
+        total_base = total_iva = total_total = 0.0
+        for linha in linhas:
+            table_data.append([
+                f"{linha['taxa']}%",
+                f"{linha['base']:.2f} €",
+                f"{linha['iva']:.2f} €",
+                f"{linha['total']:.2f} €",
+            ])
+            total_base += linha['base']
+            total_iva += linha['iva']
+            total_total += linha['total']
+
+        # Linha de totais apenas se houver mais de uma taxa
+        if len(linhas) > 1:
+            table_data.append([
+                'TOTAL',
+                f"{total_base:.2f} €",
+                f"{total_iva:.2f} €",
+                f"{total_total:.2f} €",
+            ])
+
+        col_widths = [30*mm, 45*mm, 40*mm, 45*mm]
+        t = Table(table_data, colWidths=col_widths)
+
+        style_cmds = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(colors_cfg['header_bg'])),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor(colors_cfg['header_text'])),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor(colors_cfg['border'])),
+            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor(colors_cfg['border'])),
+        ]
+
+        # Destacar linha de totais
+        if len(linhas) > 1:
+            total_row = len(table_data) - 1
+            style_cmds += [
+                ('FONTNAME', (0, total_row), (-1, total_row), 'Helvetica-Bold'),
+                ('BACKGROUND', (0, total_row), (-1, total_row),
+                 colors.HexColor(colors_cfg.get('total_bg', '#edf2f7'))),
+                ('TEXTCOLOR', (0, total_row), (-1, total_row),
+                 colors.HexColor(colors_cfg.get('total_text', '#1a365d'))),
+            ]
+
+        t.setStyle(TableStyle(style_cmds))
+        elements.append(t)
+        elements.append(Spacer(1, 4*mm))
+        return elements
+
     def generate_pdf(self, client_filter: set = None) -> str:
         """Gera o PDF.
 
@@ -834,6 +966,7 @@ class ExcelToPDFConverter:
             elements.extend(self.create_header(data))
             elements.extend(self.create_document_info(data))
             elements.extend(self.create_items_table(data))
+            elements.extend(self.create_iva_summary(data))
             elements.extend(self.create_footer(data))
 
         # QR Code
@@ -1049,7 +1182,11 @@ class ExcelToPDFConverter:
         
         values_table.setStyle(TableStyle(style_cmds))
         elements.append(values_table)
-        
+
+        # === RESUMO IVA ===
+        # Construir um mini-data com apenas este item para reutilizar create_iva_summary
+        elements.extend(self.create_iva_summary({'itens': [item]}))
+
         # === DADOS BANCÁRIOS + DATA ===
         elements.append(Spacer(1, 15*mm))
         

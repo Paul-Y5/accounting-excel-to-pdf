@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import threading
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 
@@ -20,6 +21,10 @@ from src.database import init_db, migrate_from_json, update_client_cache, get_ca
 from src.email_sender import open_email_client
 from src.batch_processor import find_excel_files, process_batch
 from src import notifier
+from src.doc_sequence import (
+    list_series, upsert_serie, reset_serie, delete_serie, peek_next_number
+)
+from src.iban_validator import validate_iban, format_iban
 class ConverterApp:
     """Aplicação principal com interface gráfica para conversão de Excel para PDF."""
 
@@ -128,10 +133,15 @@ class ConverterApp:
         # Barra inferior (tema) — criada antes do notebook para ficar na base
         self._setup_bottom_bar()
 
-        # Notebook (tabs) — 5 tabs principais
+        # Notebook (tabs) — 6 tabs principais
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill='both', expand=True, padx=self._PAD_OUTER,
                            pady=(self._PAD_OUTER, 0))
+
+        # Tab 0: Dashboard
+        self.tab_dashboard = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_dashboard, text='Dashboard')
+        self._setup_dashboard_tab()
 
         # Tab 1: Conversão
         self.tab_convert = ttk.Frame(self.notebook)
@@ -187,6 +197,205 @@ class ConverterApp:
         self._theme_btn_text.set('Tema: Escuro' if new_theme == 'light' else 'Tema: Claro')
         save_config(self.config)
 
+    # =========================================================
+    # DASHBOARD
+    # =========================================================
+
+    def _setup_dashboard_tab(self):
+        """Tab Dashboard — resumo de actividade, acções rápidas e gráfico."""
+        outer = ttk.Frame(self.tab_dashboard, padding=self._PAD_OUTER)
+        outer.pack(fill='both', expand=True)
+
+        # ---- Título ----
+        title_row = ttk.Frame(outer)
+        title_row.pack(fill='x', pady=(0, 10))
+        ttk.Label(title_row, text='Dashboard', style='Header.TLabel').pack(side='left')
+        self._dash_refresh_btn = ttk.Button(
+            title_row, text='Actualizar', command=self._refresh_dashboard)
+        self._dash_refresh_btn.pack(side='right')
+
+        # ---- Cards de resumo (linha superior) ----
+        cards_frame = ttk.Frame(outer)
+        cards_frame.pack(fill='x', pady=(0, 12))
+        for col in range(4):
+            cards_frame.columnconfigure(col, weight=1, uniform='card')
+
+        self._dash_cards = {}
+        card_defs = [
+            ('conv_mes',   'Conversões\neste mês',        '#0078D4'),
+            ('taxa',       'Taxa de\nSucesso',            '#38A169'),
+            ('clientes',   'Clientes\neste mês',          '#805AD5'),
+            ('series',     'Séries de\nDocumento ativas', '#D69E2E'),
+        ]
+        for col, (key, label, color) in enumerate(card_defs):
+            card = ttk.LabelFrame(cards_frame, padding=10)
+            card.grid(row=0, column=col, padx=4, sticky='nsew')
+            val_lbl = tk.Label(card, text='—', font=(self._FONT_FAMILY, 22, 'bold'),
+                               foreground=color)
+            val_lbl.pack()
+            tk.Label(card, text=label, font=(self._FONT_FAMILY, 8),
+                     justify='center').pack()
+            self._dash_cards[key] = val_lbl
+
+        # ---- Fila inferior: gráfico | acções rápidas ----
+        bottom = ttk.Frame(outer)
+        bottom.pack(fill='both', expand=True)
+        bottom.columnconfigure(0, weight=3)
+        bottom.columnconfigure(1, weight=2)
+
+        # Gráfico de barras — conversões por mês
+        chart_frame = ttk.LabelFrame(bottom, text='Conversões por Mês', padding=8)
+        chart_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
+        self._dash_canvas = tk.Canvas(chart_frame, height=160, bg='white',
+                                      highlightthickness=0)
+        self._dash_canvas.pack(fill='both', expand=True)
+        self._dash_canvas.bind('<Configure>', lambda e: self._redraw_chart_on_resize())
+
+        # Coluna direita: acções rápidas + actividade recente
+        right_col = ttk.Frame(bottom)
+        right_col.grid(row=0, column=1, sticky='nsew')
+
+        # Acções rápidas
+        actions_frame = ttk.LabelFrame(right_col, text='Acções Rápidas', padding=8)
+        actions_frame.pack(fill='x', pady=(0, 8))
+        btn_defs = [
+            ('Converter Ficheiro',    lambda: self.notebook.select(self.tab_convert)),
+            ('Multificheiros',        lambda: self.notebook.select(self.tab_batch)),
+            ('Relatório Anual',       self._generate_annual_report),
+            ('Nova Série Documento',  lambda: (self.notebook.select(self.tab_settings),
+                                               self._add_doc_serie())),
+        ]
+        for label, cmd in btn_defs:
+            ttk.Button(actions_frame, text=label, command=cmd).pack(
+                fill='x', pady=2)
+
+        # Actividade recente
+        recent_frame = ttk.LabelFrame(right_col, text='Actividade Recente', padding=8)
+        recent_frame.pack(fill='both', expand=True)
+        cols = ('data', 'ficheiro', 'ok')
+        self._dash_recent = ttk.Treeview(
+            recent_frame, columns=cols, show='headings',
+            height=5, selectmode='none')
+        self._dash_recent.heading('data',     text='Data')
+        self._dash_recent.heading('ficheiro', text='Ficheiro')
+        self._dash_recent.heading('ok',       text='OK')
+        self._dash_recent.column('data',     width=75,  anchor='center')
+        self._dash_recent.column('ficheiro', width=120, anchor='w')
+        self._dash_recent.column('ok',       width=30,  anchor='center')
+        self._dash_recent.pack(fill='both', expand=True)
+
+        # Carregar dados iniciais
+        self._refresh_dashboard()
+
+    def _refresh_dashboard(self):
+        """Actualiza todos os widgets do dashboard com dados recentes."""
+        from src.annual_report import get_annual_data
+        from src.doc_sequence import list_series
+        from src.database import get_history
+
+        now = datetime.now()
+        ano = now.year
+        mes = now.month
+
+        # --- Dados do ano actual ---
+        anual = get_annual_data(ano)
+        mes_data = anual['by_month'][mes - 1]
+
+        conv_mes = mes_data['conversions']
+        taxa = (
+            f"{mes_data['success'] / conv_mes * 100:.0f}%"
+            if conv_mes else '—'
+        )
+        clientes_mes = mes_data['clients']
+        series_ativas = len(list_series())
+
+        self._dash_cards['conv_mes'].config(text=str(conv_mes))
+        self._dash_cards['taxa'].config(text=taxa)
+        self._dash_cards['clientes'].config(text=str(clientes_mes))
+        self._dash_cards['series'].config(text=str(series_ativas))
+
+        # --- Gráfico de barras (12 meses) ---
+        self._dash_chart_data = anual['by_month']
+        self._draw_bar_chart(anual['by_month'])
+
+        # --- Actividade recente (últimas 5) ---
+        for row in self._dash_recent.get_children():
+            self._dash_recent.delete(row)
+        for entry in get_history(limit=5):
+            try:
+                ts = datetime.fromisoformat(entry['timestamp'])
+                data_str = ts.strftime('%d/%m %H:%M')
+            except (ValueError, TypeError):
+                data_str = entry['timestamp'][:16]
+            ok_str = '✓' if entry['success'] else '✗'
+            self._dash_recent.insert('', 'end', values=(
+                data_str,
+                entry['source_file'][:20],
+                ok_str,
+            ))
+
+    def _redraw_chart_on_resize(self):
+        if hasattr(self, '_dash_chart_data'):
+            self._draw_bar_chart(self._dash_chart_data)
+
+    def _draw_bar_chart(self, by_month: list):
+        """Desenha um gráfico de barras simples no canvas do dashboard."""
+        canvas = self._dash_canvas
+        canvas.delete('all')
+        canvas.update_idletasks()
+
+        W = canvas.winfo_width() or 300
+        H = canvas.winfo_height() or 160
+        pad_left = 30
+        pad_right = 8
+        pad_top = 12
+        pad_bottom = 22
+
+        max_val = max((m['conversions'] for m in by_month), default=0)
+        if max_val == 0:
+            canvas.create_text(W // 2, H // 2, text='Sem dados',
+                               fill='gray', font=(self._FONT_FAMILY, 9))
+            return
+
+        n = 12
+        bar_area_w = W - pad_left - pad_right
+        bar_w = bar_area_w / n
+        chart_h = H - pad_top - pad_bottom
+        mes_atual = datetime.now().month
+        meses_abrev = ['J', 'F', 'M', 'A', 'M', 'J',
+                       'J', 'A', 'S', 'O', 'N', 'D']
+
+        for i, m in enumerate(by_month):
+            x0 = pad_left + i * bar_w + bar_w * 0.15
+            x1 = pad_left + (i + 1) * bar_w - bar_w * 0.15
+            bar_h = (m['conversions'] / max_val) * chart_h if max_val else 0
+            y0 = H - pad_bottom - bar_h
+            y1 = H - pad_bottom
+
+            color = '#0078D4' if (i + 1) != mes_atual else '#005a9e'
+            if m['conversions']:
+                canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline='')
+                canvas.create_text(
+                    (x0 + x1) / 2, y0 - 4,
+                    text=str(m['conversions']),
+                    font=(self._FONT_FAMILY, 7), fill='#2d3748',
+                )
+            # Rótulo do mês
+            canvas.create_text(
+                (x0 + x1) / 2, H - pad_bottom + 8,
+                text=meses_abrev[i],
+                font=(self._FONT_FAMILY, 7), fill='gray',
+            )
+
+        # Eixo Y — linha de base
+        canvas.create_line(pad_left - 2, H - pad_bottom,
+                           W - pad_right, H - pad_bottom,
+                           fill='#e2e8f0')
+        # Valor máximo
+        canvas.create_text(pad_left - 4, pad_top,
+                           text=str(max_val), anchor='e',
+                           font=(self._FONT_FAMILY, 7), fill='gray')
+
     def _setup_settings_tab(self):
         """Tab de definições com sub-notebook para todas as configurações."""
         settings_nb = ttk.Notebook(self.tab_settings)
@@ -231,6 +440,11 @@ class ConverterApp:
         self.tab_fonts = ttk.Frame(settings_nb)
         settings_nb.add(self.tab_fonts, text='Fontes')
         self._setup_fonts_tab()
+
+        # Sub-tab: Nº Documentos
+        self.tab_doc_seq = ttk.Frame(settings_nb)
+        settings_nb.add(self.tab_doc_seq, text='Nº Documentos')
+        self._setup_doc_sequence_tab()
 
         # Sub-tab: Automação
         self.tab_automation = ttk.Frame(settings_nb)
@@ -857,6 +1071,11 @@ class ConverterApp:
         self.show_date_var = tk.BooleanVar(value=self.config['footer']['show_date'])
         self.show_observations_var = tk.BooleanVar(value=self.config['footer']['show_observations'])
 
+        self.show_iva_summary_var = tk.BooleanVar(
+            value=self.config.get('pdf', {}).get('show_iva_summary', True))
+        ttk.Checkbutton(footer_frame, text="Mostrar resumo de IVA",
+                       variable=self.show_iva_summary_var).pack(anchor='w', pady=2)
+
         ttk.Checkbutton(footer_frame, text="Mostrar área de assinaturas",
                        variable=self.show_signatures_var).pack(anchor='w', pady=2)
         ttk.Checkbutton(footer_frame, text="Mostrar data de geração",
@@ -1072,7 +1291,23 @@ class ConverterApp:
 
         ttk.Label(f, text="IBAN:").grid(row=1, column=0, sticky='w', pady=5)
         iban_var = tk.StringVar()
-        ttk.Entry(f, textvariable=iban_var, width=35).grid(row=1, column=1, padx=5, pady=5)
+        iban_entry = ttk.Entry(f, textvariable=iban_var, width=35)
+        iban_entry.grid(row=1, column=1, padx=5, pady=5)
+        iban_status = ttk.Label(f, text='', foreground='gray', font=('Helvetica', 8))
+        iban_status.grid(row=2, column=1, sticky='w', padx=5)
+
+        def _on_iban_change(*_):
+            raw = iban_var.get().strip()
+            if not raw:
+                iban_status.config(text='', foreground='gray')
+                return
+            ok, msg = validate_iban(raw)
+            if ok:
+                iban_status.config(text=f'✓ {format_iban(raw)}', foreground='green')
+            else:
+                iban_status.config(text=f'✗ {msg}', foreground='red')
+
+        iban_var.trace_add('write', _on_iban_change)
 
         def confirm():
             bank = bank_var.get().strip()
@@ -1080,7 +1315,16 @@ class ConverterApp:
             if not bank or not iban:
                 messagebox.showwarning("Aviso", "Preencha o nome do banco e o IBAN.", parent=popup)
                 return
-            self.accounts_tree.insert('', 'end', values=(bank, iban, ''))
+            ok, msg = validate_iban(iban)
+            if not ok:
+                if not messagebox.askyesno(
+                    "IBAN inválido",
+                    f"{msg}\n\nGuardar mesmo assim?",
+                    parent=popup,
+                ):
+                    return
+            # Guardar sempre formatado
+            self.accounts_tree.insert('', 'end', values=(bank, format_iban(iban), ''))
             popup.destroy()
 
         ttk.Button(f, text="Adicionar", command=confirm).grid(row=2, column=1, sticky='e', pady=15)
@@ -1109,6 +1353,170 @@ class ConverterApp:
         vals = list(self.accounts_tree.item(selected[0], 'values'))
         vals[2] = 'Sim'
         self.accounts_tree.item(selected[0], values=vals)
+
+    def _setup_doc_sequence_tab(self):
+        """Tab de gestão de sequências de números de documento."""
+        frame = ttk.Frame(self.tab_doc_seq, padding=self._PAD_OUTER)
+        frame.pack(fill='both', expand=True)
+
+        ttk.Label(frame, text='Sequências de Nº de Documento',
+                  style='Header.TLabel').pack(anchor='w')
+        ttk.Label(
+            frame,
+            text='Gerir séries de numeração automática para faturas, recibos, etc.',
+            foreground='gray',
+        ).pack(anchor='w', pady=(0, 10))
+
+        # --- Treeview ---
+        cols = ('serie', 'ano', 'ultimo', 'proximo', 'reset')
+        self._doc_seq_tree = ttk.Treeview(
+            frame, columns=cols, show='headings', height=8, selectmode='browse'
+        )
+        self._doc_seq_tree.heading('serie',   text='Série')
+        self._doc_seq_tree.heading('ano',     text='Ano')
+        self._doc_seq_tree.heading('ultimo',  text='Último Nº')
+        self._doc_seq_tree.heading('proximo', text='Próximo')
+        self._doc_seq_tree.heading('reset',   text='Reset Anual')
+        self._doc_seq_tree.column('serie',   width=80,  anchor='center')
+        self._doc_seq_tree.column('ano',     width=60,  anchor='center')
+        self._doc_seq_tree.column('ultimo',  width=90,  anchor='center')
+        self._doc_seq_tree.column('proximo', width=130, anchor='center')
+        self._doc_seq_tree.column('reset',   width=90,  anchor='center')
+        self._doc_seq_tree.pack(fill='x', pady=(0, 6))
+
+        self._reload_doc_seq_tree()
+
+        # --- Botões ---
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(anchor='w', pady=(0, 12))
+        ttk.Button(btn_frame, text='Nova Série',    command=self._add_doc_serie).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text='Editar',        command=self._edit_doc_serie).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text='Reiniciar',     command=self._reset_doc_serie).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text='Remover',       command=self._remove_doc_serie).pack(side='left', padx=(0, 6))
+        ttk.Button(btn_frame, text='Actualizar',    command=self._reload_doc_seq_tree).pack(side='left')
+
+        # --- Séries predefinidas ---
+        sep = ttk.LabelFrame(frame, text='Séries Predefinidas', padding=8)
+        sep.pack(fill='x')
+        ttk.Label(sep, text='Criação rápida de séries comuns:').pack(anchor='w', pady=(0, 6))
+        presets_frame = ttk.Frame(sep)
+        presets_frame.pack(anchor='w')
+        for code, label in [('FT', 'Fatura'), ('FR', 'Fatura-Recibo'),
+                             ('REC', 'Recibo'), ('ND', 'Nota de Entrega'),
+                             ('NC', 'Nota de Crédito')]:
+            ttk.Button(
+                presets_frame, text=f'{code} — {label}',
+                command=lambda c=code: self._create_preset_serie(c),
+            ).pack(side='left', padx=(0, 6))
+
+    def _reload_doc_seq_tree(self):
+        """Recarrega a treeview das séries."""
+        for item in self._doc_seq_tree.get_children():
+            self._doc_seq_tree.delete(item)
+        for s in list_series():
+            self._doc_seq_tree.insert('', 'end', values=(
+                s['serie'],
+                s['ano'],
+                s['ultimo_numero'],
+                s['proximo'],
+                'Sim' if s['reset_anual'] else 'Não',
+            ))
+
+    def _add_doc_serie(self):
+        """Diálogo para criar uma nova série."""
+        self._doc_serie_dialog()
+
+    def _edit_doc_serie(self):
+        """Diálogo para editar a série seleccionada."""
+        sel = self._doc_seq_tree.selection()
+        if not sel:
+            messagebox.showwarning('Aviso', 'Seleccione uma série para editar.')
+            return
+        vals = self._doc_seq_tree.item(sel[0], 'values')
+        self._doc_serie_dialog(
+            serie=vals[0],
+            ano=int(vals[1]),
+            ultimo=int(vals[2]),
+            reset_anual=(vals[4] == 'Sim'),
+        )
+
+    def _doc_serie_dialog(self, serie='', ano=None, ultimo=0, reset_anual=True):
+        """Diálogo genérico para criar/editar série."""
+        from datetime import datetime
+        if ano is None:
+            ano = datetime.now().year
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title('Série de Documento')
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        pad = {'padx': 8, 'pady': 4}
+        ttk.Label(dlg, text='Série (ex: FT, FR, REC):').grid(row=0, column=0, sticky='w', **pad)
+        v_serie = tk.StringVar(value=serie)
+        e_serie = ttk.Entry(dlg, textvariable=v_serie, width=10)
+        e_serie.grid(row=0, column=1, sticky='w', **pad)
+        if serie:
+            e_serie.config(state='disabled')
+
+        ttk.Label(dlg, text='Ano:').grid(row=1, column=0, sticky='w', **pad)
+        v_ano = tk.IntVar(value=ano)
+        ttk.Spinbox(dlg, textvariable=v_ano, from_=2000, to=2100, width=8).grid(row=1, column=1, sticky='w', **pad)
+
+        ttk.Label(dlg, text='Último Nº emitido:').grid(row=2, column=0, sticky='w', **pad)
+        v_ultimo = tk.IntVar(value=ultimo)
+        ttk.Spinbox(dlg, textvariable=v_ultimo, from_=0, to=99999, width=8).grid(row=2, column=1, sticky='w', **pad)
+
+        v_reset = tk.BooleanVar(value=reset_anual)
+        ttk.Checkbutton(dlg, text='Reset anual (reinicia em Jan)', variable=v_reset).grid(
+            row=3, column=0, columnspan=2, sticky='w', **pad)
+
+        def _confirm():
+            s = v_serie.get().strip().upper()
+            if not s:
+                messagebox.showwarning('Aviso', 'A série não pode estar vazia.', parent=dlg)
+                return
+            upsert_serie(s, v_ultimo.get(), v_ano.get(), v_reset.get())
+            self._reload_doc_seq_tree()
+            dlg.destroy()
+
+        btn_row = ttk.Frame(dlg)
+        btn_row.grid(row=4, column=0, columnspan=2, pady=8)
+        ttk.Button(btn_row, text='Guardar', command=_confirm).pack(side='left', padx=6)
+        ttk.Button(btn_row, text='Cancelar', command=dlg.destroy).pack(side='left')
+
+    def _reset_doc_serie(self):
+        """Reinicia o contador da série seleccionada."""
+        sel = self._doc_seq_tree.selection()
+        if not sel:
+            messagebox.showwarning('Aviso', 'Seleccione uma série para reiniciar.')
+            return
+        serie = self._doc_seq_tree.item(sel[0], 'values')[0]
+        if messagebox.askyesno('Confirmar',
+                               f"Reiniciar o contador da série '{serie}' para zero?"):
+            reset_serie(serie)
+            self._reload_doc_seq_tree()
+
+    def _remove_doc_serie(self):
+        """Remove a série seleccionada."""
+        sel = self._doc_seq_tree.selection()
+        if not sel:
+            messagebox.showwarning('Aviso', 'Seleccione uma série para remover.')
+            return
+        serie = self._doc_seq_tree.item(sel[0], 'values')[0]
+        if messagebox.askyesno('Confirmar',
+                               f"Remover permanentemente a série '{serie}'?"):
+            delete_serie(serie)
+            self._reload_doc_seq_tree()
+
+    def _create_preset_serie(self, code: str):
+        """Cria uma série predefinida se ainda não existir."""
+        existing = {s['serie'] for s in list_series()}
+        if code in existing:
+            messagebox.showinfo('Info', f"A série '{code}' já existe.")
+            return
+        upsert_serie(code)
+        self._reload_doc_seq_tree()
 
     def _setup_qrcode_tab(self):
         """Tab de configurações de QR Code."""
@@ -1470,6 +1878,8 @@ class ConverterApp:
                 'margin_bottom': self.margin_bottom_var.get(),
                 'margin_left': self.margin_left_var.get(),
                 'margin_right': self.margin_right_var.get(),
+                'show_iva_summary': self.show_iva_summary_var.get()
+                    if hasattr(self, 'show_iva_summary_var') else True,
             },
             'header': {
                 'show_header': self.show_header_var.get(),
@@ -2190,6 +2600,9 @@ class ConverterApp:
         self.row_padding_var.set(cfg['table']['row_padding'])
         self.show_grid_var.set(cfg['table']['show_grid'])
         self.alternate_rows_var.set(cfg['table']['alternate_rows'])
+        # PDF extras
+        if hasattr(self, 'show_iva_summary_var'):
+            self.show_iva_summary_var.set(cfg.get('pdf', {}).get('show_iva_summary', True))
         # Footer
         self.show_signatures_var.set(cfg['footer']['show_signatures'])
         self.show_date_var.set(cfg['footer']['show_date'])
@@ -2419,6 +2832,7 @@ class ConverterApp:
 
         ttk.Button(btn_frame, text="Atualizar", command=self._refresh_history).pack(side='left', padx=(0, 6))
         ttk.Button(btn_frame, text="Limpar Histórico", command=self._clear_history).pack(side='left', padx=6)
+        ttk.Button(btn_frame, text="Relatório Anual", command=self._generate_annual_report).pack(side='left', padx=6)
         ttk.Button(btn_frame, text="Exportar CSV", command=self._export_history_csv).pack(side='right', padx=(6, 0))
         ttk.Button(btn_frame, text="Exportar Excel", command=self._export_history_excel).pack(side='right', padx=6)
 
@@ -2658,6 +3072,66 @@ class ConverterApp:
                 os.startfile(output)
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao exportar:\n{e}")
+
+    def _generate_annual_report(self):
+        """Diálogo para gerar o relatório anual de actividade."""
+        from src.annual_report import get_available_years, generate_annual_report_pdf, generate_annual_report_excel
+
+        anos = get_available_years()
+        ano_atual = datetime.now().year if not anos else anos[0]
+        opcoes = [str(a) for a in anos] if anos else [str(ano_atual)]
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Relatório Anual")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        pad = {'padx': 10, 'pady': 6}
+        ttk.Label(dlg, text="Seleccione o ano:").grid(row=0, column=0, sticky='w', **pad)
+        ano_var = tk.StringVar(value=opcoes[0])
+        ttk.Combobox(dlg, textvariable=ano_var, values=opcoes,
+                     state='readonly', width=10).grid(row=0, column=1, sticky='w', **pad)
+
+        ttk.Label(dlg, text="Formato:").grid(row=1, column=0, sticky='w', **pad)
+        fmt_var = tk.StringVar(value='PDF')
+        ttk.Radiobutton(dlg, text='PDF', variable=fmt_var, value='PDF').grid(
+            row=1, column=1, sticky='w', padx=10)
+        ttk.Radiobutton(dlg, text='Excel (.xlsx)', variable=fmt_var, value='Excel').grid(
+            row=2, column=1, sticky='w', padx=10)
+
+        def _gerar():
+            ano = int(ano_var.get())
+            fmt = fmt_var.get()
+            ext = '.pdf' if fmt == 'PDF' else '.xlsx'
+            output = filedialog.asksaveasfilename(
+                title="Guardar relatório como",
+                defaultextension=ext,
+                initialfile=f"relatorio_anual_{ano}{ext}",
+                filetypes=[("PDF", "*.pdf")] if fmt == 'PDF' else [("Excel", "*.xlsx")],
+                parent=dlg,
+            )
+            if not output:
+                return
+            dlg.destroy()
+            try:
+                if fmt == 'PDF':
+                    path = generate_annual_report_pdf(ano, output, self.config)
+                else:
+                    path = generate_annual_report_excel(ano, output)
+                messagebox.showinfo("Sucesso", f"Relatório gerado:\n{path}")
+                if sys.platform == 'linux':
+                    subprocess.Popen(['xdg-open', path])
+                elif sys.platform == 'darwin':
+                    subprocess.Popen(['open', path])
+                else:
+                    os.startfile(path)
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao gerar relatório:\n{e}")
+
+        btn_row = ttk.Frame(dlg)
+        btn_row.grid(row=3, column=0, columnspan=2, pady=10)
+        ttk.Button(btn_row, text="Gerar", command=_gerar).pack(side='left', padx=6)
+        ttk.Button(btn_row, text="Cancelar", command=dlg.destroy).pack(side='left')
 
     def _export_excel(self):
         """Exporta os dados para Excel formatado."""
