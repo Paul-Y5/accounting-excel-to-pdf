@@ -23,6 +23,7 @@ from src import notifier
 from src.doc_sequence import (
     list_series, upsert_serie, reset_serie, delete_serie, peek_next_number
 )
+from src.iban_validator import validate_iban, format_iban
 class ConverterApp:
     """Aplicação principal com interface gráfica para conversão de Excel para PDF."""
 
@@ -1085,7 +1086,23 @@ class ConverterApp:
 
         ttk.Label(f, text="IBAN:").grid(row=1, column=0, sticky='w', pady=5)
         iban_var = tk.StringVar()
-        ttk.Entry(f, textvariable=iban_var, width=35).grid(row=1, column=1, padx=5, pady=5)
+        iban_entry = ttk.Entry(f, textvariable=iban_var, width=35)
+        iban_entry.grid(row=1, column=1, padx=5, pady=5)
+        iban_status = ttk.Label(f, text='', foreground='gray', font=('Helvetica', 8))
+        iban_status.grid(row=2, column=1, sticky='w', padx=5)
+
+        def _on_iban_change(*_):
+            raw = iban_var.get().strip()
+            if not raw:
+                iban_status.config(text='', foreground='gray')
+                return
+            ok, msg = validate_iban(raw)
+            if ok:
+                iban_status.config(text=f'✓ {format_iban(raw)}', foreground='green')
+            else:
+                iban_status.config(text=f'✗ {msg}', foreground='red')
+
+        iban_var.trace_add('write', _on_iban_change)
 
         def confirm():
             bank = bank_var.get().strip()
@@ -1093,7 +1110,16 @@ class ConverterApp:
             if not bank or not iban:
                 messagebox.showwarning("Aviso", "Preencha o nome do banco e o IBAN.", parent=popup)
                 return
-            self.accounts_tree.insert('', 'end', values=(bank, iban, ''))
+            ok, msg = validate_iban(iban)
+            if not ok:
+                if not messagebox.askyesno(
+                    "IBAN inválido",
+                    f"{msg}\n\nGuardar mesmo assim?",
+                    parent=popup,
+                ):
+                    return
+            # Guardar sempre formatado
+            self.accounts_tree.insert('', 'end', values=(bank, format_iban(iban), ''))
             popup.destroy()
 
         ttk.Button(f, text="Adicionar", command=confirm).grid(row=2, column=1, sticky='e', pady=15)
