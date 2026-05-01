@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import threading
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 
@@ -2627,6 +2628,7 @@ class ConverterApp:
 
         ttk.Button(btn_frame, text="Atualizar", command=self._refresh_history).pack(side='left', padx=(0, 6))
         ttk.Button(btn_frame, text="Limpar Histórico", command=self._clear_history).pack(side='left', padx=6)
+        ttk.Button(btn_frame, text="Relatório Anual", command=self._generate_annual_report).pack(side='left', padx=6)
         ttk.Button(btn_frame, text="Exportar CSV", command=self._export_history_csv).pack(side='right', padx=(6, 0))
         ttk.Button(btn_frame, text="Exportar Excel", command=self._export_history_excel).pack(side='right', padx=6)
 
@@ -2866,6 +2868,66 @@ class ConverterApp:
                 os.startfile(output)
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao exportar:\n{e}")
+
+    def _generate_annual_report(self):
+        """Diálogo para gerar o relatório anual de actividade."""
+        from src.annual_report import get_available_years, generate_annual_report_pdf, generate_annual_report_excel
+
+        anos = get_available_years()
+        ano_atual = datetime.now().year if not anos else anos[0]
+        opcoes = [str(a) for a in anos] if anos else [str(ano_atual)]
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Relatório Anual")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        pad = {'padx': 10, 'pady': 6}
+        ttk.Label(dlg, text="Seleccione o ano:").grid(row=0, column=0, sticky='w', **pad)
+        ano_var = tk.StringVar(value=opcoes[0])
+        ttk.Combobox(dlg, textvariable=ano_var, values=opcoes,
+                     state='readonly', width=10).grid(row=0, column=1, sticky='w', **pad)
+
+        ttk.Label(dlg, text="Formato:").grid(row=1, column=0, sticky='w', **pad)
+        fmt_var = tk.StringVar(value='PDF')
+        ttk.Radiobutton(dlg, text='PDF', variable=fmt_var, value='PDF').grid(
+            row=1, column=1, sticky='w', padx=10)
+        ttk.Radiobutton(dlg, text='Excel (.xlsx)', variable=fmt_var, value='Excel').grid(
+            row=2, column=1, sticky='w', padx=10)
+
+        def _gerar():
+            ano = int(ano_var.get())
+            fmt = fmt_var.get()
+            ext = '.pdf' if fmt == 'PDF' else '.xlsx'
+            output = filedialog.asksaveasfilename(
+                title="Guardar relatório como",
+                defaultextension=ext,
+                initialfile=f"relatorio_anual_{ano}{ext}",
+                filetypes=[("PDF", "*.pdf")] if fmt == 'PDF' else [("Excel", "*.xlsx")],
+                parent=dlg,
+            )
+            if not output:
+                return
+            dlg.destroy()
+            try:
+                if fmt == 'PDF':
+                    path = generate_annual_report_pdf(ano, output, self.config)
+                else:
+                    path = generate_annual_report_excel(ano, output)
+                messagebox.showinfo("Sucesso", f"Relatório gerado:\n{path}")
+                if sys.platform == 'linux':
+                    subprocess.Popen(['xdg-open', path])
+                elif sys.platform == 'darwin':
+                    subprocess.Popen(['open', path])
+                else:
+                    os.startfile(path)
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao gerar relatório:\n{e}")
+
+        btn_row = ttk.Frame(dlg)
+        btn_row.grid(row=3, column=0, columnspan=2, pady=10)
+        ttk.Button(btn_row, text="Gerar", command=_gerar).pack(side='left', padx=6)
+        ttk.Button(btn_row, text="Cancelar", command=dlg.destroy).pack(side='left')
 
     def _export_excel(self):
         """Exporta os dados para Excel formatado."""
